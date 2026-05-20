@@ -573,12 +573,7 @@ app.get("/api/check-auth", (req, res) => {
   res.json({ authenticated: !!(req.session && req.session.authenticated) });
 });
 
-// Serve index.html for all non-API routes
-app.get("*", (req, res) => {
-  if (!req.path.startsWith("/api")) {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
-  }
-});
+
 
 // ── REVIEW QUEUE ──────────────────────────────────────────────────────────────
 app.get("/api/review-queue", requireAuth, (req, res) => {
@@ -738,6 +733,16 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
   }
 });
 
+// ── CATCH-ALL — serve index.html for any non-API route ───────────────────────
+// Must be LAST — after all API routes are defined
+app.get("*", (req, res) => {
+  if (!req.path.startsWith("/api")) {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  } else {
+    res.status(404).json({ error: "Route not found: " + req.path });
+  }
+});
+
 // ── START ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log("Jasmine is running on port " + PORT);
@@ -749,4 +754,3 @@ app.listen(PORT, () => {
     console.log("Azure not configured — email polling disabled. Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET to enable.");
   }
 });
-
