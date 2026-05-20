@@ -772,41 +772,94 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
 
   try {
     const zip = new PizZip(docxContent);
-    const doc = new Docxtemplater(zip, {
-      paragraphLoop: true,
-      linebreaks: true,
-      delimiters: { start: "{{", end: "}}" }
-    });
+    let xmlStr = zip.file("word/document.xml").asText();
 
-    // Map fields to template placeholders
-    const data = {
-      TRAINER_NAME: fields.TRAINER_NAME || "",
-      CLASS_DATES: fields.CLASS_DATES || "",
-      START_TIME: fields.START_TIME || "09:00",
-      FINISH_TIME: fields.FINISH_TIME || "13:00",
-      CLASS_COST_EX: fields.CLASS_COST_EX || "$0.00",
-      CLASS_COST_INC: fields.CLASS_COST_INC || "$0.00",
-      MATERIALS_EX: fields.MATERIALS_EX || "$0.00",
-      MATERIALS_INC: fields.MATERIALS_INC || "$0.00",
-      TRAVEL_KM: fields.TRAVEL_KM || "$0.00",
-      ACCOM_MEALS: fields.ACCOM_MEALS || "$0.00",
-      TOTAL_EX: fields.TOTAL_EX || "$0.00",
-      TOTAL_INC: fields.TOTAL_INC || "$0.00",
-      DATE_PREPARED: fields.DATE_PREPARED || new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })
+    // Find the Request for Service table by its heading text
+    const tableStart = xmlStr.lastIndexOf("<w:tbl>", xmlStr.indexOf("Request for Service"));
+    const tableEnd = xmlStr.indexOf("</w:tbl>", tableStart) + 8;
+    let tableXml = xmlStr.slice(tableStart, tableEnd);
+
+    // Extract all rows from the table
+    const rowMatches = [...tableXml.matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)];
+
+    // Helper: set text in a specific cell of a row
+    function setCellText(rowXml, cellIndex, newText) {
+      const cells = [...rowXml.matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)];
+      if (cellIndex >= cells.length) return rowXml;
+      const cell = cells[cellIndex];
+      // Find the paragraph in this cell and replace all runs with a single new run
+      const cellXml = cell[0];
+      // Preserve cell properties (shading, borders, width)
+      const tcPr = cellXml.match(/<w:tcPr>[\s\S]*?<\/w:tcPr>/) || [""];
+      const rPr = cellXml.match(/<w:rPr>[\s\S]*?<\/w:rPr>/) || [""];
+      const newCellXml = "<w:tc>" + tcPr[0] +
+        "<w:p><w:r>" + rPr[0] +
+        "<w:t xml:space=\"preserve\">" + newText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</w:t></w:r></w:p></w:tc>";
+      return rowXml.slice(0, cell.index) + newCellXml + rowXml.slice(cell.index + cell[0].length);
+    }
+
+    // Values to fill in
+    const today = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+    const fillMap = {
+      1: { 1: "Risk 2 Solution Group" },
+      2: { 1: "diane.k@risk2solution.com    Ph: 1300 459 970" },
+      3: { 1: fields.TRAINER_NAME ? "Personal Safety and Conflict Management" : "Personal Safety and Conflict Management" },
+      4: { 1: fields.TRAINER_NAME || "" },
+      5: { 1: (fields.CLASS_DATES || "").replace(/\\n/g, ", ") },
+      6: { 1: "Start time: " + (fields.START_TIME || "09:00"), 2: "Finish time: " + (fields.FINISH_TIME || "13:00") },
+      7: { 1: "20 (as per contracted rates)" },
+      8: { 1: "Training materials supplied by Risk 2 Solution Group" },
+      10: { 1: fields.CLASS_COST_EX || "$0.00", 2: fields.CLASS_COST_INC || "$0.00" },
+      11: { 1: fields.MATERIALS_EX || "$0.00", 2: fields.MATERIALS_INC || "$0.00" },
+      12: { 1: "$0.00", 2: "$0.00" },
+      13: { 2: fields.TRAVEL_KM || "$0.00" },
+      14: { 2: fields.ACCOM_MEALS || "$0.00" },
+      15: { 1: fields.TOTAL_EX || "$0.00", 2: fields.TOTAL_INC || "$0.00" }
     };
 
-    doc.render(data);
+    // Apply fills row by row
+    let newTableXml = tableXml;
+    const updatedRows = [...rowMatches];
 
-    const buf = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
+    for (const [rowIdxStr, cellFills] of Object.entries(fillMap)) {
+      const rowIdx = parseInt(rowIdxStr);
+      if (rowIdx >= updatedRows.length) continue;
+      let rowXml = updatedRows[rowIdx][0];
+      for (const [cellIdxStr, value] of Object.entries(cellFills)) {
+        rowXml = setCellText(rowXml, parseInt(cellIdxStr), value);
+      }
+      updatedRows[rowIdx] = { 0: rowXml, index: updatedRows[rowIdx].index };
+    }
 
-    const filename = outputFilename;
+    // Fix YES/NO row (row 16)
+    if (updatedRows[16]) {
+      updatedRows[16][0] = updatedRows[16][0].replace(">YES/NO<", ">YES<");
+    }
+
+    // Rebuild table with updated rows
+    let rebuilt = tableXml;
+    // Replace rows from last to first to preserve indices
+    for (let i = rowMatches.length - 1; i >= 0; i--) {
+      const orig = rowMatches[i];
+      rebuilt = rebuilt.slice(0, orig.index) + updatedRows[i][0] + rebuilt.slice(orig.index + orig[0].length);
+    }
+
+    // Replace table in document
+    xmlStr = xmlStr.slice(0, tableStart) + rebuilt + xmlStr.slice(tableEnd);
+
+    // Add prepared date at end of document before </w:body>
+    const prepNote = "<w:p><w:r><w:rPr><w:sz w:val=\"16\"/><w:szCs w:val=\"16\"/><w:i/><w:color w:val=\"666666\"/></w:rPr><w:t xml:space=\"preserve\">Section completed by Jasmine (Risk 2 Solution Group Scheduling Agent) on " + today + "</w:t></w:r></w:p>";
+    xmlStr = xmlStr.replace("</w:body>", prepNote + "</w:body>");
+
+    zip.file("word/document.xml", xmlStr);
+    const buf = zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-    res.setHeader("Content-Disposition", 'attachment; filename="' + filename + '"');
+    res.setHeader("Content-Disposition", 'attachment; filename="' + outputFilename + '"');
     res.send(buf);
-    console.log("Section 5 generated for entry", entry.id);
+    console.log("Section completed and document generated for entry", entry.id);
   } catch (err) {
-    console.error("Section 5 generation error:", err);
+    console.error("Document generation error:", err);
     res.status(500).json({ error: "Could not generate document: " + err.message });
   }
 });
