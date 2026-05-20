@@ -433,6 +433,7 @@ nav { flex: 1; padding: 10px 8px; }
           <div style="font-size:13px;color:#64748b;" id="queue-count-label">Loading queue…</div>
           <div style="display:flex;gap:8px;">
             <button class="add-btn" style="background:#475569;" onclick="pollNow()">🔄 Check Inbox Now</button>
+            <button class="add-btn" style="background:#92400e;" onclick="reprocessAll()" title="Force reprocess all recent emails, ignoring processed tags — use for testing">⚡ Force Reprocess</button>
           </div>
         </div>
         <div id="queue-m365-status" style="margin-bottom:12px;"></div>
@@ -661,12 +662,7 @@ const VA_PAIRS={
 
 // Email log is now dynamic — see emailLog array
 
-let bookings=[
-  {id:1,client:"Virgin Australia",session:"Security Awareness — Recurrent",date:"2026-05-15",state:"VIC",trainers:["Ross Mackenzie","Grant McDonald"],status:"Confirmed",fd:false},
-  {id:2,client:"DEECA",session:"Personal Safety & Conflict Mgmt",date:"2026-06-10",state:"VIC",trainers:["Ross Mackenzie"],status:"Quote Pending",fd:true},
-  {id:3,client:"Scentregroup",session:"Chief Warden / Manage Self-Resilience",date:"2026-05-22",state:"SYD",trainers:["Mark Edmonds"],status:"Confirmed",fd:false},
-  {id:4,client:"Virgin Australia",session:"OVA (Virgin Australia)",date:"2026-05-28",state:"NSW",trainers:["Mark Edmonds"],status:"Confirmed",fd:false},
-];
+let bookings=[];
 
 let chatHist=[], selEmail=null, bkFormOpen=false, vaOpen=false;
 
@@ -816,7 +812,7 @@ DEECA QUOTE WORKFLOW:
 7. Calculate full quote: (course cost x sessions) + (materials x sessions) + travel + accommodation + meals
 8. Complete Section 5 "Request for Service" with ALL fields populated
 9. Tentatively hold all dates in the calendar (full day blocks, marked provisional)
-10. Write client email using tentative language — dates provisionally held, NOT confirmed — include completed Section 5 in email body
+10. Write client email using tentative language — dates provisionally held, NOT confirmed — include completed Request for Service section in email body
 11. Note for Diane: save original .docx, paste Section 5 content into it, attach completed .docx to Outlook email before sending
 12. Present everything to Diane for review — NOTHING SENT AND NOTHING CONFIRMED YET
 13. Diane approves → send email with attached completed Word doc to Organisational_Capability_Team@deeca.vic.gov.au
@@ -1237,8 +1233,10 @@ BOOKING RULES:
 
 DEECA PRICING (inc GST): Course $1,996 per session | Materials $36 per session | Travel $0.88/km return trip beyond 200km total | Accommodation $207/night (if >100km one-way) | Meals $128.85/night
 
-DEECA SECTION 5 — populate all fields using EXACT placeholder names below.
-These placeholders match the Word template exactly and are used by Power Automate to fill the document automatically.
+DEECA QUOTE SECTION — populate all fields using EXACT placeholder names below.
+The section to complete is identified by its heading: "Request for Service (to be completed by the training service provider)"
+This section is sometimes numbered Section 4, sometimes Section 5 — the NUMBER does not matter. Find it by its heading name.
+These placeholders match the Word template exactly.
 
 TEMPLATE PLACEHOLDERS — populate each field in quote_section5_fields object:
   TRAINER_NAME: assigned trainer (Ross Mackenzie 1st, Grant McDonald 2nd)
@@ -1263,7 +1261,7 @@ DEECA CLIENT EMAIL:
 - Use tentative language ONLY — dates are provisionally held pending quote approval
 - List each class as a bullet: date | venue | session type | trainer | start time
 - Do NOT include Section 5 or any pricing in the client email body
-- End with: "Please find the completed Request for Service (Section 5) attached. Kindly review and confirm your approval so we can proceed to formally confirm these dates."
+- End with: "Please find the completed Request for Service attached. Kindly review and confirm your approval so we can proceed to formally confirm these dates."
 - Sign off with the standard sign-off
 - Section 5 is provided separately in quote_section5 for Diane to paste into the Word doc and attach
 
@@ -1815,7 +1813,7 @@ function renderProcessResults(j, rawEmail){
   const isDeecaBatch = bks.some(b=>b.action_type==="deeca_quote");
   if(isDeecaBatch && sec5){
     html+=`<div class="proc-deeca" style="margin-top:0;">
-      <div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.06em;margin-bottom:6px;">📋 SECTION 5 — REQUEST FOR SERVICE (COMPLETED)</div><div style="font-size:11px;color:#15803d;margin-bottom:10px;">Copy this into the original DEECA Word document and attach to the email before sending.</div>
+      <div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.06em;margin-bottom:6px;">📋 REQUEST FOR SERVICE — COMPLETED (Section may be numbered 4 or 5)</div><div style="font-size:11px;color:#15803d;margin-bottom:10px;">Find the section headed "Request for Service (to be completed by the training service provider)" in the original DEECA Word document, copy these values in, and attach before sending.</div>
       <div style="font-size:12px;color:#14532d;white-space:pre-wrap;line-height:1.9;font-family:'Courier New',monospace;background:#f0fdf4;padding:14px 16px;border-radius:8px;border:1px solid #86efac;">${esc(sec5)}</div>
       ${buildFieldsTable(j.quote_section5_fields)}
       ${j.quote_total?`<div style="margin-top:12px;padding:10px 14px;background:#dcfce7;border-radius:8px;font-size:14px;font-weight:700;color:#15803d;">Total Quote: $${j.quote_total.toFixed(2)} inc GST</div>`:""}
@@ -1843,7 +1841,7 @@ function renderProcessResults(j, rawEmail){
       html+=`<div class="proc-flag" style="line-height:1.8;">
       <strong>⚠ Before sending — Diane must:</strong><br>
       1. Open the original DEECA Word document (the Class Request Form)<br>
-      2. Copy the completed <strong>Section 5</strong> text from the green box above into the Word document<br>
+      2. Find the section headed <strong>"Request for Service (to be completed by the training service provider)"</strong> in the Word document and fill it in using the values from the green box above<br>
       3. Save the Word document<br>
       4. Click <strong>Open in Outlook ↗</strong> above — the client email opens pre-filled with tentative booking details<br>
       5. Attach the completed Word document to the email<br>
@@ -2306,11 +2304,13 @@ function openQueueItem(id) {
       `;}).join("")}
     </div>
     ${item.client_email_body?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;letter-spacing:.05em;margin-bottom:6px;">DRAFT CLIENT EMAIL</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;font-size:12px;color:#374151;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.7;">${esc(item.client_email_body)}</div></div>`:""}
-    ${isDeeca&&item.quote_section5?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.05em;margin-bottom:6px;">SECTION 5 — COMPLETED QUOTE</div><div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:12px;color:#14532d;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.8;">${esc(item.quote_section5)}</div></div>`:""}
+    ${isDeeca&&item.quote_section5?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.05em;margin-bottom:6px;">REQUEST FOR SERVICE — COMPLETED QUOTE</div><div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:12px;color:#14532d;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.8;">${esc(item.quote_section5)}</div></div>`:""}
     ${item.drafts&&item.drafts.length?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;">OUTLOOK DRAFTS READY</div>${item.drafts.map(function(d){return`<div style="font-size:12px;color:#15803d;padding:4px 0;">✓ ${esc(d.description||d.type)} → ${esc(d.to||"")}</div>`;}).join("")}</div>`:""}
     <div class="bk-detail-actions">
       <button class="cal-btn green" onclick="approveItem(${item.id})">✓ Approve — Create Calendar & Confirm Drafts</button>
       <button class="cal-btn" style="background:#dc2626;" onclick="rejectItem(${item.id})">✕ Reject</button>
+      ${isDeeca && SERVER_MODE ? `<button class="cal-btn" style="background:#15803d;" onclick="downloadSection5(${item.id})">📄 Download Section 5 Word Doc</button>` : ""}
+      ${isDeeca && !SERVER_MODE ? `<div style="font-size:12px;color:#64748b;padding:8px 0;">📄 Section 5 Word download available when running on server</div>` : ""}
     </div>
   `;
   document.getElementById("bk-detail-overlay").classList.add("open");
@@ -2342,6 +2342,39 @@ async function approveItem(id) {
   }
 }
 
+async function downloadSection5(id) {
+  if (!SERVER_MODE) { alert("Section 5 download requires server mode."); return; }
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = "Generating…";
+  try {
+    const res = await fetch("/api/generate-section5/" + id);
+    if (!res.ok) {
+      const err = await res.json();
+      alert("Could not generate document: " + (err.error || "Unknown error"));
+      btn.disabled = false;
+      btn.textContent = "📄 Download Section 5 Word Doc";
+      return;
+    }
+    // Trigger download
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "DEECA_Section5.docx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    btn.disabled = false;
+    btn.textContent = "📄 Download Section 5 Word Doc";
+  } catch(e) {
+    alert("Error: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "📄 Download Section 5 Word Doc";
+  }
+}
+
 function rejectItem(id) {
   if (!confirm("Reject this booking? No emails will be sent.")) return;
   if (SERVER_MODE) {
@@ -2351,6 +2384,21 @@ function rejectItem(id) {
   closeBkDetail();
   renderQueue(queueData);
   updateQueueBadge(queueData.length);
+}
+
+async function reprocessAll() {
+  if (!SERVER_MODE) { alert("Requires server mode."); return; }
+  if (!confirm("Force reprocess all recent emails? This will re-run Jasmine on emails already tagged as processed. Use for testing only.")) return;
+  const btn = document.querySelector("[onclick='reprocessAll()']");
+  if (btn) { btn.disabled=true; btn.textContent="Reprocessing…"; }
+  const res = await apiCall("POST", "/api/reprocess-all");
+  if (btn) { btn.disabled=false; btn.textContent="⚡ Force Reprocess"; }
+  if (res && res.success) {
+    alert("Reprocessed " + res.processed + " email(s). Refreshing queue…");
+    await loadQueueFromServer();
+  } else {
+    alert("Error: " + (res && res.error ? res.error : "Unknown error"));
+  }
 }
 
 async function pollNow() {
