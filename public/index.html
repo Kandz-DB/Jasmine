@@ -2180,7 +2180,7 @@ function rebuildSysContext(){
 
 // ─── SERVER INTEGRATION ────────────────────────────────────────────────────────
 
-const SERVER_MODE = false; // Set to true when running with server.js
+const SERVER_MODE = true; // Running on server — auth and API routes enabled
 // When hosted on Azure, the HTML talks to the Express server via /api/* routes
 // In standalone mode, everything runs client-side as before
 
@@ -2573,8 +2573,33 @@ const _origRenderProcessResults = renderProcessResults;
     <input type="password" id="login-pw" placeholder="Enter password" style="width:100%;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;margin-bottom:12px;box-sizing:border-box;" onkeydown="if(event.key==='Enter')doLogin()">
     <button onclick="doLogin()" style="width:100%;padding:12px;background:#b91c1c;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">Sign In</button>
     <div id="login-error" style="color:#b91c1c;font-size:12px;margin-top:10px;display:none;">Incorrect password</div>
-    <div style="margin-top:20px;font-size:11px;color:#94a3b8;">No server detected — running in standalone mode</div>
+    <div id="login-mode-note" style="margin-top:20px;font-size:11px;color:#94a3b8;"></div>
   </div>
 </div>
+<script>
+// Run immediately — show login if SERVER_MODE is true
+(function(){
+  var overlay = document.getElementById("login-overlay");
+  if(!overlay) return;
+  if(typeof SERVER_MODE !== "undefined" && SERVER_MODE){
+    // Check auth status with server
+    fetch("/api/check-auth")
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d.authenticated){
+          overlay.style.display = "flex";
+          var note = document.getElementById("login-mode-note");
+          if(note) note.textContent = "Connected to Jasmine server";
+        }
+      })
+      .catch(function(){
+        // Can't reach server — show overlay anyway
+        overlay.style.display = "flex";
+        var note = document.getElementById("login-mode-note");
+        if(note) note.textContent = "Connecting to server…";
+      });
+  }
+})();
+</script>
 </body>
 </html>
