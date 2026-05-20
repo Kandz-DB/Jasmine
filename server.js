@@ -45,6 +45,18 @@ function getClientFromEmail(email) {
   if (from.includes("@deeca.vic.gov.au")) return "DEECA";
   if (from.includes("@wayss.org.au")) return "Wayss";
   if (from.includes("@scentregroup.com")) return "Scentregroup";
+  // Internal senders (staff forwarding emails for testing)
+  if (from.includes("@risk2solution.com")) return "INTERNAL";
+  return null;
+}
+
+function detectClientFromContent(bodyText) {
+  const text = (bodyText || "").toLowerCase();
+  if (text.includes("virginaustralia.com") || text.includes("virgin australia")) return "Virgin Australia";
+  if (text.includes("vline.com.au") || text.includes("v/line")) return "V/Line";
+  if (text.includes("deeca.vic.gov.au") || text.includes("deeca") || text.includes("conflict training request") || text.includes("request for service")) return "DEECA";
+  if (text.includes("wayss.org.au") || text.includes("wayss")) return "Wayss";
+  if (text.includes("scentregroup.com") || text.includes("scentre")) return "Scentregroup";
   return null;
 }
 
@@ -250,10 +262,33 @@ async function pollInbox() {
     for (const email of unprocessed) {
       try {
         const senderEmail = (email.from && email.from.emailAddress ? email.from.emailAddress.address : "").toLowerCase();
-        const clientName = getClientFromEmail(senderEmail);
+        let clientName = getClientFromEmail(senderEmail);
+
+        // For internal senders (staff forwarding emails for testing/manual submission)
+        // Always process — let Jasmine identify the client from content + attachments
+        if (clientName === "INTERNAL") {
+          // Try subject line first (fastest)
+          const subject = (email.subject || "").toLowerCase();
+          let detectedClient = detectClientFromContent(subject);
+
+          // Try body preview
+          if (!detectedClient) {
+            const bodyPreview = (email.bodyPreview || "") + (email.body && email.body.content ? email.body.content.replace(/<[^>]+>/g, " ") : "");
+            detectedClient = detectClientFromContent(bodyPreview);
+          }
+
+          if (detectedClient) {
+            console.log("Internal forward — client detected from content: " + detectedClient);
+            clientName = detectedClient;
+          } else {
+            // Could not detect from subject/body — still process, Jasmine will read the attachment
+            console.log("Internal forward — client unknown from header/body, processing anyway (attachment may contain client info)");
+            clientName = "Unknown — Internal Forward";
+          }
+        }
 
         if (!clientName) {
-          // Unknown sender — log it but don't process
+          // Truly unknown external sender
           console.log("Unknown sender: " + senderEmail);
           emailLog.push({
             id: Date.now(),
@@ -330,10 +365,20 @@ async function processInboundEmail(email, clientName, token) {
     }
   }
 
+  // If client was not detected from header, try attachment text
+  if ((clientName === "Unknown — Internal Forward" || clientName === "INTERNAL") && attachmentText) {
+    const detected = detectClientFromContent(attachmentText);
+    if (detected) {
+      clientName = detected;
+      console.log("Client detected from attachment: " + clientName);
+    }
+  }
+
   const emailContent = [
     "From: " + (email.from && email.from.emailAddress ? email.from.emailAddress.address : ""),
     "Subject: " + (email.subject || ""),
     "Date received: " + (email.receivedDateTime || ""),
+    "Client identified as: " + clientName,
     "Body: " + bodyText.slice(0, 6000),
     attachmentText.slice(0, 16000)
   ].join("\n");
@@ -611,6 +656,39 @@ app.post("/api/review-queue/:id/reject", requireAuth, (req, res) => {
 app.post("/api/poll-now", requireAuth, async (req, res) => {
   try { await pollInbox(); res.json({ success: true }); }
   catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Force reprocess — reads ALL emails ignoring the Jasmine Processed tag
+// Use this when testing or if something was missed
+app.post("/api/reprocess-all", requireAuth, async (req, res) => {
+  try {
+    const token = await getGraphToken();
+    const result = await graphRequest("GET",
+      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=20&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories",
+      null, token);
+    if (!result || !result.value) return res.json({ success: true, processed: 0 });
+    let count = 0;
+    for (const email of result.value) {
+      const senderEmail = (email.from && email.from.emailAddress ? email.from.emailAddress.address : "").toLowerCase();
+      let clientName = getClientFromEmail(senderEmail);
+      if (clientName === "INTERNAL") {
+        const bodyText = (email.bodyPreview || "") + (email.body && email.body.content ? email.body.content : "");
+        clientName = detectClientFromContent(bodyText);
+      }
+      if (clientName === "INTERNAL") {
+        const subject = (email.subject || "").toLowerCase();
+        const bodyText = (email.bodyPreview || "");
+        clientName = detectClientFromContent(subject) || detectClientFromContent(bodyText) || "Unknown — Internal Forward";
+      }
+      if (clientName) {
+        await processInboundEmail(email, clientName, token);
+        count++;
+      }
+    }
+    res.json({ success: true, processed: count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── BOOKINGS ──────────────────────────────────────────────────────────────────
