@@ -31,7 +31,8 @@ const CLIENT_DOMAINS = [
   "@vline.com.au",
   "@deeca.vic.gov.au",
   "@wayss.org.au",
-  "@scentregroup.com"
+  "@scentregroup.com",
+  "kandia@risk2solution.com" // TEMP: remove after testing
 ];
 
 function getClientFromEmail(email) {
@@ -524,6 +525,13 @@ app.post("/api/logout", (req, res) => { req.session.destroy(); res.json({ succes
 
 app.get("/api/check-auth", (req, res) => {
   res.json({ authenticated: !!(req.session && req.session.authenticated) });
+});
+
+// Serve index.html for all non-API routes
+app.get("*", (req, res) => {
+  if (!req.path.startsWith("/api")) {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  }
 });
 
 // ── REVIEW QUEUE ──────────────────────────────────────────────────────────────
