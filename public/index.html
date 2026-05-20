@@ -1,0 +1,2575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jasmine — Risk 2 Solution Group</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; height: 100vh; display: flex; overflow: hidden; color: #0f172a; }
+
+#sidebar { width: 200px; background: #0f172a; display: flex; flex-direction: column; flex-shrink: 0; height: 100vh; }
+.brand { padding: 20px 16px 16px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 10px; }
+.brand-icon { width: 32px; height: 32px; border-radius: 8px; background: #b91c1c; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; font-weight: 700; flex-shrink: 0; }
+.brand-name { color: white; font-weight: 600; font-size: 14px; }
+.brand-ver { color: #4e6280; font-size: 10px; margin-top: 1px; }
+
+nav { flex: 1; padding: 10px 8px; }
+.nav-btn { width: 100%; display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; border: none; background: transparent; color: #94a3b8; cursor: pointer; font-size: 13px; font-weight: 400; margin-bottom: 2px; text-align: left; transition: background .15s, color .15s; font-family: inherit; }
+.nav-btn:hover { background: #1e293b; color: #cbd5e1; }
+.nav-btn.active { background: #1e293b; color: white; font-weight: 500; }
+.nav-btn .ico { font-size: 13px; flex-shrink: 0; }
+
+.sf { padding: 14px 16px 18px; border-top: 1px solid #1e293b; }
+.sf-lbl { font-size: 10px; color: #334155; letter-spacing: .05em; margin-bottom: 3px; margin-top: 8px; }
+.sf-lbl:first-child { margin-top: 0; }
+.sf-val { font-size: 11px; color: #64748b; }
+.settings-btn { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; border: none; background: transparent; color: #475569; cursor: pointer; font-size: 12px; margin-top: 8px; transition: color .15s; font-family: inherit; }
+.settings-btn:hover { color: #94a3b8; }
+
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#topbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 14px 22px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+#topbar h1 { font-size: 15px; font-weight: 600; color: #0f172a; }
+.status-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+
+#content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.tp { display: none; flex: 1; flex-direction: column; overflow: hidden; height: 100%; }
+.tp.active { display: flex; }
+
+/* CHAT */
+#chat-msgs { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.mrow { display: flex; align-items: flex-start; gap: 10px; }
+.mrow.user { justify-content: flex-end; }
+.mavatar { width: 30px; height: 30px; border-radius: 8px; background: #b91c1c; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.mbubble { max-width: 72%; padding: 11px 15px; font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.mbubble.a { border-radius: 16px 16px 16px 4px; background: white; color: #0f172a; border: 1px solid #e2e8f0; }
+.mbubble.u { border-radius: 16px 16px 4px 16px; background: #0f172a; color: white; }
+.tdots { display: flex; gap: 5px; padding: 14px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 16px 16px 16px 4px; align-items: center; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #b91c1c; display:inline-block; animation: dottrain 1.4s ease-in-out infinite; }
+.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+.chat-sug { padding: 0 24px 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.sug-btn { font-size: 11px; padding: 5px 11px; border-radius: 14px; border: 1px solid #e2e8f0; background: white; cursor: pointer; color: #374151; transition: background .15s; font-family: inherit; }
+.sug-btn:hover { background: #f1f5f9; }
+.chat-input-row { padding: 0 24px 22px; display: flex; gap: 10px; }
+#chat-input { flex: 1; padding: 11px 15px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 13px; outline: none; background: white; font-family: inherit; resize: none; height: 44px; transition: border-color .15s; }
+#chat-input:focus { border-color: #94a3b8; }
+#send-btn { padding: 11px 20px; background: #b91c1c; color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 500; font-size: 13px; transition: background .15s; white-space: nowrap; font-family: inherit; }
+#send-btn:hover { background: #991b1b; }
+#send-btn:disabled { background: #94a3b8; cursor: default; }
+
+/* PANELS */
+.padded { padding: 24px; overflow-y: auto; height: 100%; }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: 16px; }
+.card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+.card-header { padding: 16px 20px; display: flex; align-items: center; gap: 12px; }
+.card-ico { width: 36px; height: 36px; border-radius: 8px; background: rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.card-title { color: white; font-weight: 600; font-size: 15px; }
+.card-sub { color: rgba(255,255,255,.8); font-size: 11px; margin-top: 1px; }
+.card-body { padding: 14px 20px; }
+.mlbl { font-size: 10px; color: #94a3b8; letter-spacing: .05em; margin-bottom: 4px; margin-top: 10px; }
+.mlbl:first-child { margin-top: 0; }
+.mval { font-size: 12px; color: #374151; line-height: 1.6; }
+.mono { font-family: 'Courier New', monospace; background: #f8fafc; padding: 3px 7px; border-radius: 5px; font-size: 11px; display: inline-block; }
+
+/* SESSIONS */
+.sess-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(286px, 1fr)); gap: 14px; }
+.sess-card { background: white; border-radius: 10px; border: 1px solid #e2e8f0; padding: 16px 18px; position: relative; }
+.sess-card.fd { border-color: #86efac; }
+.sess-name { font-weight: 500; font-size: 13px; color: #0f172a; margin-bottom: 12px; line-height: 1.4; padding-right: 70px; }
+.fd-badge { position: absolute; top: 12px; right: 12px; font-size: 10px; font-weight: 600; background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 10px; }
+.sess-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.cpill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 500; margin: 2px 2px 2px 0; }
+
+/* TRAINERS */
+.tr-table { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+.tr-hdr { display: grid; grid-template-columns: 36px 148px 1fr 90px; gap: 12px; padding: 10px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; font-weight: 500; letter-spacing: .05em; }
+.tr-row { display: grid; grid-template-columns: 36px 148px 1fr 90px; gap: 12px; align-items: center; padding: 12px 20px; border-bottom: 1px solid #f1f5f9; }
+.tr-row:last-child { border-bottom: none; }
+.tr-av { width: 30px; height: 30px; border-radius: 8px; background: #1e293b; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; }
+.tr-name { font-size: 13px; font-weight: 500; color: #0f172a; }
+.temp-b { display: inline-block; font-size: 10px; background: #fef9c3; color: #854d0e; padding: 1px 6px; border-radius: 6px; margin-top: 2px; }
+.tr-scope { font-size: 12px; color: #64748b; }
+.tr-em { font-size: 10px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* VA PAIRS */
+.va-panel { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+.va-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); gap: 10px; margin-top: 12px; }
+.va-sc { background: #f8fafc; border-radius: 8px; padding: 10px 12px; }
+.va-st { font-weight: 600; font-size: 12px; color: #0f172a; margin-bottom: 6px; }
+.va-pr { font-size: 11px; color: #374151; margin-bottom: 4px; }
+.va-pn { color: #94a3b8; }
+.va-ova { font-size: 11px; color: #7c3aed; margin-top: 6px; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+
+/* EMAILS */
+#emails-panel { display: flex; height: 100%; overflow: hidden; }
+.el-list { width: 340px; border-right: 1px solid #e2e8f0; overflow-y: auto; flex-shrink: 0; }
+.el-hdr { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #64748b; }
+.el-row { padding: 14px 20px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background .1s; }
+.el-row:hover { background: #f8fafc; }
+.el-row.sel { background: #f1f5f9; }
+.el-row.unread { background: #fffbeb; }
+.el-top { display: flex; justify-content: space-between; margin-bottom: 3px; }
+.el-from { font-size: 12px; color: #0f172a; }
+.el-from.b { font-weight: 600; }
+.el-date { font-size: 11px; color: #94a3b8; }
+.el-subj { font-size: 12px; color: #374151; margin-bottom: 3px; }
+.el-subj.b { font-weight: 600; }
+.el-bot { display: flex; justify-content: space-between; align-items: center; }
+.el-prev { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.ctag { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 10px; margin-left: 8px; flex-shrink: 0; }
+.el-detail { flex: 1; overflow-y: auto; padding: 24px; }
+.el-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94a3b8; font-size: 14px; }
+
+/* BOOKINGS */
+.bk-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.bk-form { background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 20px; margin-bottom: 20px; }
+.fg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.fi { padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; font-family: inherit; outline: none; background: white; width: 100%; }
+.fi:focus { border-color: #94a3b8; }
+.bk-list { display: flex; flex-direction: column; gap: 10px; }
+.bk-row { background: white; border-radius: 10px; border: 1px solid #e2e8f0; padding: 14px 20px; display: flex; align-items: center; gap: 14px; }
+.bk-row.fd { border-color: #86efac; }
+.bk-ico { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.bk-ico.r { background: #f0f9ff; } .bk-ico.f { background: #dcfce7; }
+.bk-info { flex: 1; min-width: 0; }
+.bk-sess { font-weight: 500; font-size: 13px; color: #0f172a; }
+.bk-meta { font-size: 12px; color: #64748b; margin-top: 2px; }
+.bk-tr { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.sp { font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 10px; flex-shrink: 0; }
+
+/* PRICING */
+.ptbl { background: white; border-radius: 10px; border: 1px solid #e2e8f0; padding: 16px 20px; margin-top: 20px; }
+.pg { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 8px; margin-top: 12px; }
+.pc { background: #f8fafc; border-radius: 8px; padding: 8px 12px; }
+
+/* GENERIC */
+.btn-row { display: flex; gap: 8px; }
+.btn { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; transition: background .15s; border: none; }
+.btn-p { background: #0f172a; color: white; } .btn-p:hover { background: #1e293b; }
+.btn-s { background: white; color: #374151; border: 1px solid #e2e8f0; } .btn-s:hover { background: #f8fafc; }
+.btn-g { background: #15803d; color: white; } .btn-g:hover { background: #166534; }
+.btn-r { background: #b91c1c; color: white; } .btn-r:hover { background: #991b1b; }
+.alert { border-radius: 10px; padding: 14px 16px; font-size: 13px; margin-bottom: 16px; }
+.alert.w { background: #fef9c3; border: 1px solid #fde047; color: #713f12; }
+.alert.i { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+
+/* MODAL */
+.mo { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; align-items: center; justify-content: center; }
+.mo.open { display: flex; }
+.modal { background: white; border-radius: 14px; padding: 28px; width: 440px; max-width: 90vw; }
+.modal h2 { font-size: 17px; font-weight: 600; color: #0f172a; margin-bottom: 6px; }
+.modal p { font-size: 13px; color: #64748b; margin-bottom: 20px; line-height: 1.5; }
+.modal label { display: block; font-size: 12px; color: #374151; margin-bottom: 6px; font-weight: 500; }
+.modal input { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; font-family: inherit; outline: none; margin-bottom: 16px; }
+.modal input:focus { border-color: #94a3b8; }
+.modal-acts { display: flex; gap: 8px; justify-content: flex-end; }
+
+
+
+
+/* IMAGE ATTACHMENT */
+.img-attach-zone { border: 2px dashed #e2e8f0; border-radius: 10px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: border-color .2s, background .2s; position: relative; background: #f8fafc; margin-bottom: 12px; }
+.img-attach-zone:hover, .img-attach-zone.drag-over { border-color: #7c3aed; background: #f5f3ff; }
+.img-attach-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.img-attach-zone.loaded { border-color: #22c55e; background: #f0fdf4; border-style: solid; }
+.iaz-ico { font-size: 22px; flex-shrink: 0; }
+.iaz-text { flex: 1; }
+.iaz-label { font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 2px; }
+.iaz-sub { font-size: 11px; color: #94a3b8; }
+.iaz-preview { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; border: 1px solid #e2e8f0; display: none; flex-shrink: 0; }
+.iaz-preview.show { display: block; }
+
+/* DROP ZONE */
+.drop-zone { border: 2px dashed #e2e8f0; border-radius: 10px; padding: 22px 20px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; margin-bottom: 12px; position: relative; background: #f8fafc; }
+.drop-zone:hover, .drop-zone.drag-over { border-color: #b91c1c; background: #fef2f2; }
+.drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.drop-zone-icon { font-size: 26px; margin-bottom: 6px; }
+.drop-zone-label { font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 3px; }
+.drop-zone-sub { font-size: 11px; color: #94a3b8; }
+.drop-zone.loaded { border-color: #22c55e; background: #f0fdf4; border-style: solid; }
+.drop-zone.loaded .drop-zone-label { color: #15803d; }
+.dz-or { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.dz-or span { font-size: 11px; color: #94a3b8; white-space: nowrap; }
+.dz-or::before, .dz-or::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+
+/* PROCESS EMAIL TAB */
+.proc-wrap { padding: 20px 24px; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 16px; }
+.proc-input-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 18px 20px; }
+.proc-input-card label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 8px; letter-spacing: .04em; }
+.proc-textarea { width: 100%; min-height: 160px; padding: 12px 14px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; font-family: inherit; resize: vertical; outline: none; line-height: 1.6; color: #0f172a; }
+.proc-textarea:focus { border-color: #94a3b8; }
+.proc-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.proc-btn { padding: 10px 22px; background: #b91c1c; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; transition: background .15s; }
+.proc-btn:hover { background: #991b1b; }
+.proc-btn:disabled { background: #94a3b8; cursor: default; }
+.proc-hint { font-size: 12px; color: #94a3b8; }
+.proc-results { display: flex; flex-direction: column; gap: 14px; }
+.proc-summary { background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; padding: 16px 18px; }
+.proc-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 10px; }
+.proc-summary-item { }
+.psi-lbl { font-size: 10px; color: #94a3b8; letter-spacing: .05em; margin-bottom: 2px; }
+.psi-val { font-size: 12px; font-weight: 500; color: #0f172a; }
+.email-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+.email-card-hdr { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
+.email-card-title { font-size: 13px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 8px; }
+.email-card-to { font-size: 11px; color: #64748b; }
+.email-card-body { padding: 14px 18px; font-size: 13px; line-height: 1.75; color: #374151; white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+.open-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0f172a; color: white; border-radius: 8px; font-size: 12px; font-weight: 600; text-decoration: none; transition: background .15s; white-space: nowrap; flex-shrink: 0; }
+.open-btn:hover { background: #1e293b; }
+.open-btn.trainer { background: #15803d; }
+.open-btn.trainer:hover { background: #166534; }
+.open-btn.deeca { background: #7c3aed; }
+.open-btn.deeca:hover { background: #6d28d9; }
+.proc-flag { background: #fef9c3; border: 1px solid #fde047; border-radius: 10px; padding: 12px 16px; font-size: 13px; color: #713f12; }
+.proc-deeca { background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 16px 18px; }
+.proc-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: #94a3b8; font-size: 14px; text-align: center; gap: 10px; }
+.rules-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #dbeafe; color: #1e40af; margin-top: 4px; }
+
+
+/* DOT TRAIN LOADER */
+@keyframes dottrain { 0%{transform:translateX(-18px);opacity:0} 30%,70%{transform:translateX(0);opacity:1} 100%{transform:translateX(18px);opacity:0} }
+.dot-train { display:flex; align-items:center; gap:6px; }
+.dot-train span { width:10px; height:10px; border-radius:50%; background:#b91c1c; display:inline-block; animation:dottrain 1.4s ease-in-out infinite; }
+.dot-train span:nth-child(2) { animation-delay:.2s; }
+.dot-train span:nth-child(3) { animation-delay:.4s; }
+
+
+/* ADD MODAL */
+.add-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:300; align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto; }
+.add-modal-overlay.open { display:flex; }
+.add-modal { background:white; border-radius:16px; width:100%; max-width:580px; padding:28px; position:relative; margin:auto; }
+.add-modal h2 { font-size:17px; font-weight:700; color:#0f172a; margin-bottom:4px; }
+.add-modal p { font-size:12px; color:#64748b; margin-bottom:20px; line-height:1.5; }
+.add-modal-close { position:absolute; top:16px; right:16px; width:28px; height:28px; border-radius:6px; border:none; background:#f1f5f9; cursor:pointer; font-size:16px; line-height:1; }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+.form-grid.full { grid-template-columns:1fr; }
+.form-field { display:flex; flex-direction:column; gap:5px; }
+.form-field label { font-size:11px; font-weight:600; color:#374151; letter-spacing:.04em; }
+.form-field input, .form-field select, .form-field textarea { padding:9px 12px; border-radius:8px; border:1px solid #e2e8f0; font-size:13px; font-family:inherit; outline:none; background:white; color:#0f172a; transition:border-color .15s; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus { border-color:#94a3b8; }
+.form-field textarea { resize:vertical; min-height:90px; line-height:1.6; }
+.form-section-title { font-size:11px; font-weight:700; color:#64748b; letter-spacing:.06em; text-transform:uppercase; margin:16px 0 10px; padding-bottom:6px; border-bottom:1px solid #f1f5f9; grid-column:1/-1; }
+.modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+.checkrow { display:flex; align-items:center; gap:8px; font-size:13px; color:#374151; }
+.checkrow input[type=checkbox] { width:16px; height:16px; accent-color:#b91c1c; }
+.tab-topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.add-btn { padding:8px 16px; background:#b91c1c; color:white; border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; font-family:inherit; display:flex; align-items:center; gap:6px; transition:background .15s; }
+.add-btn:hover { background:#991b1b; }
+
+::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 3px; }
+
+/* DROP ZONE */
+.drop-zone { border: 2px dashed #e2e8f0; border-radius: 10px; padding: 22px 20px; text-align: center; transition: border-color .2s, background .2s; margin-bottom: 12px; background: #f8fafc; }
+.drop-zone input[type=file] { display: none; }
+.drop-zone.loaded { border-color: #22c55e; background: #f0fdf4; border-style: solid; }
+.drop-zone.drag-over { border-color: #b91c1c; background: #fef2f2; }
+.drop-zone-icon { font-size: 26px; margin-bottom: 6px; }
+.drop-zone-label { font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 3px; }
+.drop-zone-sub { font-size: 11px; color: #94a3b8; }
+.dz-or { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.dz-or span { font-size: 11px; color: #94a3b8; white-space: nowrap; }
+.dz-or::before, .dz-or::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+
+/* IMAGE ATTACHMENT */
+.img-attach-zone { border: 2px dashed #e2e8f0; border-radius: 10px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; transition: border-color .2s, background .2s; background: #f8fafc; margin-bottom: 12px; }
+.img-attach-zone.loaded { border-color: #22c55e; background: #f0fdf4; border-style: solid; }
+.iaz-ico { font-size: 22px; flex-shrink: 0; }
+.iaz-text { flex: 1; }
+.iaz-label { font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 2px; }
+.iaz-sub { font-size: 11px; color: #94a3b8; }
+.iaz-preview { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; border: 1px solid #e2e8f0; display: none; flex-shrink: 0; }
+.iaz-preview.show { display: block; }
+
+/* PROCESS EMAIL TAB */
+.proc-wrap { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.proc-input-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 18px 20px; }
+.proc-input-card label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 8px; letter-spacing: .04em; }
+.proc-textarea { width: 100%; min-height: 120px; padding: 12px 14px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; font-family: inherit; resize: vertical; outline: none; line-height: 1.6; color: #0f172a; }
+.proc-textarea:focus { border-color: #94a3b8; }
+.proc-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.proc-btn { padding: 10px 22px; background: #b91c1c; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; transition: background .15s; }
+.proc-btn:hover { background: #991b1b; }
+.proc-btn:disabled { background: #94a3b8; cursor: default; }
+.proc-hint { font-size: 12px; color: #94a3b8; }
+.proc-results { display: flex; flex-direction: column; gap: 14px; }
+.proc-summary { background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0; padding: 16px 18px; }
+.proc-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 10px; }
+.psi-lbl { font-size: 10px; color: #94a3b8; letter-spacing: .05em; margin-bottom: 2px; }
+.psi-val { font-size: 12px; font-weight: 500; color: #0f172a; }
+.email-card { background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+.email-card-hdr { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
+.email-card-title { font-size: 13px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 8px; }
+.email-card-to { font-size: 11px; color: #64748b; }
+.email-card-body { padding: 14px 18px; font-size: 13px; line-height: 1.75; color: #374151; white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+.open-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0f172a; color: white; border-radius: 8px; font-size: 12px; font-weight: 600; text-decoration: none; transition: background .15s; white-space: nowrap; flex-shrink: 0; }
+.open-btn:hover { background: #1e293b; }
+.open-btn.trainer { background: #15803d; }
+.open-btn.trainer:hover { background: #166534; }
+.open-btn.deeca { background: #7c3aed; }
+.open-btn.deeca:hover { background: #6d28d9; }
+.proc-flag { background: #fef9c3; border: 1px solid #fde047; border-radius: 10px; padding: 12px 16px; font-size: 13px; color: #713f12; line-height: 1.8; }
+.proc-deeca { background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 16px 18px; }
+.proc-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: #94a3b8; font-size: 14px; text-align: center; gap: 10px; }
+.rules-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #dbeafe; color: #1e40af; margin-top: 4px; }
+
+/* EMAIL LOG */
+.el-filter { padding:6px 14px; border-radius:20px; border:1px solid #e2e8f0; background:white; font-size:12px; font-weight:500; cursor:pointer; color:#64748b; transition:all .15s; font-family:inherit; }
+.el-filter:hover { border-color:#94a3b8; color:#374151; }
+.el-filter.active { background:#0f172a; color:white; border-color:#0f172a; }
+.email-log-row { background:white; border-radius:10px; border:1px solid #e2e8f0; padding:14px 18px; margin-bottom:10px; cursor:pointer; transition:border-color .15s; }
+.email-log-row:hover { border-color:#94a3b8; }
+.email-log-top { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.email-log-client { font-size:11px; font-weight:700; padding:2px 9px; border-radius:10px; flex-shrink:0; }
+.email-log-date { font-size:11px; color:#94a3b8; margin-left:auto; }
+.email-log-summary { font-size:12px; color:#64748b; }
+.email-log-sessions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+.email-log-session-tag { font-size:11px; padding:2px 8px; border-radius:6px; background:#f1f5f9; color:#374151; }
+
+/* BOOKING DETAIL MODAL */
+.bk-detail-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:200; align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto; }
+.bk-detail-overlay.open { display:flex; }
+.bk-detail-panel { background:white; border-radius:16px; width:100%; max-width:560px; padding:28px; position:relative; margin:auto; }
+.bk-detail-close { position:absolute; top:16px; right:16px; width:28px; height:28px; border-radius:6px; border:none; background:#f1f5f9; cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; }
+.bk-detail-title { font-size:16px; font-weight:700; color:#0f172a; margin-bottom:4px; padding-right:36px; }
+.bk-detail-sub { font-size:12px; color:#64748b; margin-bottom:20px; }
+.bk-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
+.bk-detail-field { background:#f8fafc; border-radius:8px; padding:10px 12px; }
+.bk-detail-lbl { font-size:10px; color:#94a3b8; letter-spacing:.05em; margin-bottom:3px; }
+.bk-detail-val { font-size:13px; font-weight:500; color:#0f172a; }
+.bk-detail-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.cal-btn { display:inline-flex; align-items:center; gap:6px; padding:10px 18px; background:#1d4ed8; color:white; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none; transition:background .15s; border:none; cursor:pointer; font-family:inherit; }
+.cal-btn:hover { background:#1e40af; }
+.cal-btn.green { background:#15803d; }
+.cal-btn.green:hover { background:#166534; }
+.bk-row { cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.bk-row:hover { border-color:#94a3b8; box-shadow:0 2px 8px rgba(0,0,0,.06); }
+
+/* REVIEW BOX */
+.review-box { background: white; border: 2px solid #f59e0b; border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+.review-box-title { font-size: 13px; font-weight: 700; color: #92400e; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.review-box-sub { font-size: 12px; color: #78350f; margin-bottom: 12px; line-height: 1.5; }
+.review-textarea { width: 100%; min-height: 200px; padding: 12px; border-radius: 8px; border: 1px solid #fcd34d; font-size: 12px; font-family: monospace; line-height: 1.7; resize: vertical; outline: none; background: #fffbeb; color: #1c1917; }
+.review-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+
+</style>
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<div id="sidebar">
+  <div class="brand">
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+  <rect x="11" y="2" width="22" height="20" rx="3.5" fill="none" stroke="#7f1d1d" stroke-width="1.5"/>
+  <rect x="11" y="2" width="22" height="6.5" rx="3.5" fill="#7f1d1d"/>
+  <rect x="11" y="6" width="22" height="2.5" fill="#7f1d1d"/>
+  <rect x="16" y="0.5" width="2.5" height="5" rx="1.25" fill="#7f1d1d"/>
+  <rect x="26" y="0.5" width="2.5" height="5" rx="1.25" fill="#7f1d1d"/>
+  <rect x="6" y="7" width="22" height="20" rx="3.5" fill="#1a2744" stroke="#991b1b" stroke-width="1.5"/>
+  <rect x="6" y="7" width="22" height="6.5" rx="3.5" fill="#991b1b"/>
+  <rect x="6" y="11" width="22" height="2.5" fill="#991b1b"/>
+  <rect x="11" y="5.5" width="2.5" height="5" rx="1.25" fill="#991b1b"/>
+  <rect x="21" y="5.5" width="2.5" height="5" rx="1.25" fill="#991b1b"/>
+  <rect x="1" y="12" width="22" height="22" rx="3.5" fill="#0f172a" stroke="#b91c1c" stroke-width="1.5"/>
+  <rect x="1" y="12" width="22" height="6.5" rx="3.5" fill="#b91c1c"/>
+  <rect x="1" y="16" width="22" height="2.5" fill="#b91c1c"/>
+  <rect x="6"  y="10.5" width="2.5" height="5" rx="1.25" fill="#b91c1c"/>
+  <rect x="16" y="10.5" width="2.5" height="5" rx="1.25" fill="#b91c1c"/>
+  <text x="12" y="21.5" font-family="system-ui,-apple-system,sans-serif" font-size="4.5" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.6">MAR</text>
+  <text x="6"  y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">3</text>
+  <text x="12" y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">5</text>
+  <text x="18" y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">7</text>
+  <text x="6"  y="33.5" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">10</text>
+  <circle cx="12" cy="32" r="4" fill="#b91c1c"/>
+  <text x="12" y="33.8" font-family="system-ui,-apple-system,sans-serif" font-size="5" font-weight="700" fill="white" text-anchor="middle">12</text>
+  <text x="18" y="33.5" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">14</text>
+</svg>
+    <div><div class="brand-name">Jasmine</div><div class="brand-ver">R2S Scheduling Agent</div></div>
+  </div>
+  <nav>
+    <button class="nav-btn active" data-tab="chat"><span class="ico">💬</span> Chat</button>
+    <button class="nav-btn" data-tab="emails"><span class="ico">✉️</span> Emails</button>
+    <button class="nav-btn" data-tab="bookings"><span class="ico">📅</span> Bookings</button>
+    <button class="nav-btn" data-tab="clients"><span class="ico">🏢</span> Clients</button>
+    <button class="nav-btn" data-tab="trainers"><span class="ico">👥</span> Trainers</button>
+    <button class="nav-btn" data-tab="sessions"><span class="ico">📋</span> Sessions</button>
+    <button class="nav-btn" data-tab="queue" onclick="switchTab('queue');loadQueueFromServer()"><span class="ico">🔔</span> Review Queue<span id="queue-badge" style="display:none;margin-left:6px;background:#b91c1c;color:white;border-radius:10px;font-size:10px;font-weight:700;padding:2px 6px;">0</span></button>
+    <button class="nav-btn" data-tab="process"><span class="ico">📨</span> Process Email</button>
+  </nav>
+  <div class="sf">
+    <div class="sf-lbl">OPERATOR</div><div class="sf-val">diane.k@risk2solution.com</div>
+    <div class="sf-lbl">TIMEZONE</div><div class="sf-val">AEST (UTC+10)</div>
+    <div class="sf-lbl">LOCATION</div><div class="sf-val">Brisbane, Australia</div>
+    <button class="settings-btn" onclick="openSettings()">⚙ API Settings</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="topbar">
+    <h1 id="topbar-title">Chat</h1>
+    <div class="status-badge"><span class="status-dot"></span>5 clients · 16 trainers · 9 session types</div>
+  </div>
+  <div id="content">
+
+    <!-- CHAT -->
+    <div class="tp active" id="tp-chat">
+      <div id="chat-msgs"></div>
+      <div class="chat-sug">
+        <button class="sug-btn" onclick="setSug('Book VA Security Awareness (Recurrent) in QLD')">Book VA Security Awareness in QLD</button>
+        <button class="sug-btn" onclick="setSug('Who covers NSW for Virgin Australia Security Awareness?')">Who covers NSW for VA?</button>
+        <button class="sug-btn" onclick="setSug('Calculate a DEECA quote for a venue in Bendigo')">DEECA quote for Bendigo</button>
+        <button class="sug-btn" onclick="setSug('Book a Scentregroup Chief Warden session in Sydney')">Scentregroup Sydney</button>
+      </div>
+      <div class="chat-input-row">
+        <textarea id="chat-input" placeholder="Ask Jasmine anything about scheduling..." rows="1"></textarea>
+        <button id="send-btn" onclick="sendMsg()">Send</button>
+      </div>
+    </div>
+
+
+    <!-- REVIEW QUEUE -->
+    <div class="tp" id="tp-queue">
+      <div class="padded">
+        <div class="tab-topbar">
+          <div style="font-size:13px;color:#64748b;" id="queue-count-label">Loading queue…</div>
+          <div style="display:flex;gap:8px;">
+            <button class="add-btn" style="background:#475569;" onclick="pollNow()">🔄 Check Inbox Now</button>
+          </div>
+        </div>
+        <div id="queue-m365-status" style="margin-bottom:12px;"></div>
+        <div id="queue-list"></div>
+      </div>
+    </div>
+
+<!-- PROCESS EMAIL -->
+    <div class="tp" id="tp-process">
+      <div class="proc-wrap">
+        <div class="proc-input-card">
+          <label>ATTACH OR PASTE AN EMAIL</label>
+
+          <div class="drop-zone" id="drop-zone">
+            <input type="file" id="email-file" accept=".eml,.txt,.msg" onchange="handleFileSelect(event)">
+            <div class="drop-zone-icon">📎</div>
+            <div class="drop-zone-label" id="dz-label">Drag an email file here</div>
+            <div class="drop-zone-sub">Supports .eml files saved from Outlook</div>
+            <label for="email-file" style="display:inline-block;margin-top:10px;padding:7px 18px;background:#0f172a;color:white;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;">Browse for file</label>
+          </div>
+
+                    <div class="dz-or"><span>attach the booking form — Word or Excel</span></div>
+
+          <div class="drop-zone" id="doc-drop-zone" style="border-color:#15803d;background:#f0fdf4;">
+            <input type="file" id="doc-file" accept=".docx,.xlsx,.txt,.csv" onchange="handleDocSelect(event)" style="display:none;">
+            <div class="drop-zone-icon">📄</div>
+            <div class="drop-zone-label" id="doc-dz-label">Drag the DEECA form, VA schedule or booking document here</div>
+            <div class="drop-zone-sub">Word (.docx) or Excel (.xlsx) — Jasmine will read the full document</div>
+            <label for="doc-file" style="display:inline-block;margin-top:10px;padding:7px 18px;background:#15803d;color:white;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;">Browse for document</label>
+          </div>
+
+          <div class="dz-or"><span>got an image with the booking details?</span></div>
+
+          <div class="img-attach-zone" id="img-attach-zone">
+            <input type="file" id="img-file" accept="image/*" onchange="handleImgSelect(event)">
+            <div class="iaz-ico">🖼️</div>
+            <div class="iaz-text">
+              <div class="iaz-label" id="iaz-label">Attach image containing booking details</div>
+              <div class="iaz-sub">Save the embedded image/table from the email and attach it here. Jasmine will read it visually.</div>
+              <label for="img-file" style="display:inline-block;margin-top:8px;padding:6px 14px;background:#7c3aed;color:white;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;">Browse for image</label>
+            </div>
+            <img id="iaz-preview" class="iaz-preview" alt="preview">
+          </div>
+
+          <div class="dz-or"><span>or type / paste below</span></div>
+
+          <textarea class="proc-textarea" id="proc-input" placeholder="Paste the email text here, or describe the booking request in plain English. For example:
+
+From: ops@virginaustralia.com
+Subject: Security Awareness Recurrent — QLD
+
+Hi Diane, we need a Security Awareness Recurrent session in Brisbane (QLD) on 12 June 2026 for 24 participants.
+
+Jasmine will read it, apply all booking rules, and generate ready-to-send emails."></textarea>
+          <div class="proc-actions">
+            <button class="proc-btn" id="proc-btn" onclick="processEmail()">Process with Jasmine</button>
+            <button class="btn btn-s" onclick="clearProcess()" style="font-size:12px;">Process Another Email</button>
+            <span class="proc-hint" id="proc-hint">Paste or attach an email — if the booking details are in an image, attach it separately below</span>
+          </div>
+        </div>
+        <div id="proc-results">
+          <div class="proc-empty">
+            <div style="font-size:36px;">📨</div>
+            <div>Paste a client email above and click <strong>Process with Jasmine</strong></div>
+            <div style="font-size:12px;">Jasmine will generate a client reply and trainer confirmation — each with an Open in Outlook button</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EMAILS -->
+    <div class="tp" id="tp-emails">
+      <div class="padded">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;" id="email-log-filters">
+            <button class="el-filter active" data-client="all" onclick="filterEmailLog('all')">All</button>
+            <button class="el-filter" data-client="Virgin Australia" onclick="filterEmailLog('Virgin Australia')">Virgin Australia</button>
+            <button class="el-filter" data-client="V/Line" onclick="filterEmailLog('V/Line')">V/Line</button>
+            <button class="el-filter" data-client="DEECA" onclick="filterEmailLog('DEECA')">DEECA</button>
+            <button class="el-filter" data-client="Wayss" onclick="filterEmailLog('Wayss')">Wayss</button>
+            <button class="el-filter" data-client="Scentregroup" onclick="filterEmailLog('Scentregroup')">Scentregroup</button>
+          </div>
+          <span style="font-size:12px;color:#94a3b8;" id="email-log-count">0 emails processed</span>
+        </div>
+        <div id="email-log-list">
+          <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
+            <div style="font-size:36px;margin-bottom:12px;">📭</div>
+            <div style="font-size:14px;font-weight:500;margin-bottom:6px;">No emails processed yet</div>
+            <div style="font-size:12px;">Process an email in the Process Email tab — it will appear here automatically, organised by client.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOOKINGS -->
+    <div class="tp" id="tp-bookings">
+      <div class="padded">
+        <div class="bk-top"><span style="font-size:13px;color:#64748b;" id="bk-count">Loading…</span><button class="btn btn-r" onclick="toggleBkForm()">+ New Booking</button></div>
+        <div id="bk-form-wrap"></div>
+        <div class="bk-list" id="bk-list"></div>
+      </div>
+    </div>
+
+    <!-- CLIENTS -->
+    <div class="tp" id="tp-clients">
+      <div class="padded">
+        <div class="tab-topbar">
+          <div style="font-size:13px;color:#64748b;" id="cl-count">5 clients</div>
+          <button class="add-btn" onclick="openModal('client')">＋ Add Client</button>
+        </div>
+        <div class="cards-grid" id="cl-grid"></div>
+      </div>
+    </div>
+
+    <!-- TRAINERS -->
+    <div class="tp" id="tp-trainers">
+      <div class="padded">
+        <div style="display:flex;gap:10px;margin-bottom:16px;">
+          <input type="search" id="tr-search" class="fi" style="flex:1;" placeholder="Search trainers by name or assignment…" oninput="filterTr()">
+          <button class="btn btn-s" onclick="toggleVA()" id="va-btn" style="white-space:nowrap;padding:9px 14px;font-size:12px;font-weight:500;">VA Pairs ▼</button>
+          <button class="add-btn" onclick="openModal('trainer')">＋ Add Trainer</button>
+        </div>
+        <div id="va-wrap" style="display:none;"></div>
+        <div class="tr-table">
+          <div class="tr-hdr"><div></div><div>NAME</div><div>ASSIGNMENTS</div><div>EMAIL STATUS</div></div>
+          <div id="tr-rows"></div>
+        </div>
+        <div style="margin-top:12px;font-size:12px;color:#94a3b8;">Note: 13 of 16 trainers on temporary emails — update when real addresses confirmed.</div>
+      </div>
+    </div>
+
+    <!-- SESSIONS -->
+    <div class="tp" id="tp-sessions">
+      <div class="padded">
+        <div class="tab-topbar">
+          <div style="font-size:13px;color:#64748b;" id="se-count">9 session types</div>
+          <button class="add-btn" onclick="openModal('session')">＋ Add Session Type</button>
+        </div>
+        <div class="sess-grid" id="sess-grid"></div>
+        <div class="ptbl">
+          <div style="font-weight:600;font-size:13px;color:#0f172a;">DEECA Pricing Reference</div>
+          <div class="pg">
+            <div class="pc"><div class="mlbl">Course (ex GST)</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$1,814.55</div></div>
+            <div class="pc"><div class="mlbl">Course (inc GST)</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$1,996.00</div></div>
+            <div class="pc"><div class="mlbl">Materials</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$36.00 / booking</div></div>
+            <div class="pc"><div class="mlbl">Travel</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$0.88 / km (>100km)</div></div>
+            <div class="pc"><div class="mlbl">Accommodation</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$207.00 / night</div></div>
+            <div class="pc"><div class="mlbl">Breakfast</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$32.10</div></div>
+            <div class="pc"><div class="mlbl">Lunch</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$32.80</div></div>
+            <div class="pc"><div class="mlbl">Dinner</div><div class="mval" style="font-size:13px;font-weight:500;color:#15803d;">$63.95</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="mo" id="settings-mo">
+  <div class="modal">
+    <h2>API Settings</h2>
+    <p>Enter your Anthropic API key to enable the Chat tab. Get one at <a href="https://console.anthropic.com" target="_blank" style="color:#b91c1c;">console.anthropic.com</a> (pay-as-you-go, very cheap for normal use). The key is saved only in this browser.</p>
+    <label>Anthropic API Key</label>
+    <input type="password" id="api-input" placeholder="sk-ant-…">
+    <div class="modal-acts">
+      <button class="btn btn-s" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-r" onclick="saveSettings()">Save Key</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script>
+// ─── DATA ──────────────────────────────────────────────────────────────────────
+
+const CLIENTS=[
+  {id:"va", name:"Virgin Australia",short:"VA",domain:"@virginaustralia.com",color:"#b91c1c",state:"All states",notes:"2 trainers for Security Awareness if 14 or more participants. 1 trainer only if under 14 participants. OVA always uses 1 trainer. SA always uses 1 trainer regardless of session type."},
+  {id:"vl", name:"V/Line",short:"VL",domain:"@vline.com.au",color:"#1d4ed8",state:"VIC",notes:"Session times TBC for Manage Conflict & Unlawful Behaviour and Authorised Officer Training. Trainer counts TBC."},
+  {id:"de", name:"DEECA",short:"DE",domain:"@deeca.vic.gov.au",color:"#15803d",state:"VIC",notes:"Quote workflow required before any booking. All sessions booked as full day. Return forms to: Organisational_Capability_Team@deeca.vic.gov.au"},
+  {id:"wy", name:"Wayss",short:"WY",domain:"@wayss.org.au",color:"#7c3aed",state:"VIC",notes:"VIC only. 2nd preference trainer TBC. Trainer counts TBC."},
+  {id:"sc", name:"Scentregroup",short:"SC",domain:"@scentregroup.com",color:"#c2410c",state:"Multi-state",notes:"Operates across SYD (NSW), VIC, QLD, WA, ACT, SA and NZ. Domain confirmed as @scentregroup.com — verify with client."},
+];
+
+const TRAINERS=[
+  {id:1,name:"Ross Mackenzie",email:"diane.k@risk2solution.com",temp:false,scope:"VA (all), V/Line VIC, DEECA VIC, Wayss VIC, Scentregroup VIC"},
+  {id:2,name:"Dani Stevenson",email:"kandia@risk2solution.com",temp:false,scope:"VA (all states)"},
+  {id:3,name:"Paul Johnston",email:"reinette.k@risk2solution.com",temp:false,scope:"VA QLD 2nd pair, VA WA 1st pair, Scentregroup QLD/WA/ACT"},
+  {id:4,name:"Grant McDonald",email:"diane.k@risk2solution.com",temp:true,scope:"VA VIC 1st pair, DEECA VIC, Scentregroup VIC"},
+  {id:5,name:"Mark Edmonds",email:"kandia@risk2solution.com",temp:true,scope:"VA NSW 1st pair, Scentregroup SYD"},
+  {id:6,name:"Dirk McLean",email:"diane.k@risk2solution.com",temp:true,scope:"VA VIC 2nd pair, V/Line VIC, Scentregroup VIC"},
+  {id:7,name:"Dave Cohen",email:"diane.k@risk2solution.com",temp:true,scope:"VA NSW 3rd pair, VA WA 2nd pair, VA SA 1st, Scentregroup SYD/WA/ACT/SA/NZ"},
+  {id:8,name:"Lawrence Phillips",email:"diane.k@risk2solution.com",temp:true,scope:"VA QLD 1st pair, Scentregroup QLD"},
+  {id:9,name:"Chris Walsh",email:"diane.k@risk2solution.com",temp:true,scope:"VA QLD 1st pair"},
+  {id:10,name:"Dan Du Plessis",email:"diane.k@risk2solution.com",temp:true,scope:"VA QLD 2nd pair"},
+  {id:11,name:"Mick Haran",email:"diane.k@risk2solution.com",temp:true,scope:"VA NSW 1st pair"},
+  {id:12,name:"Marina Toailoa",email:"diane.k@risk2solution.com",temp:true,scope:"VA NSW 2nd pair"},
+  {id:13,name:"Shane Garrett",email:"diane.k@risk2solution.com",temp:true,scope:"VA NSW 2nd pair"},
+  {id:14,name:"Adam Stone",email:"diane.k@risk2solution.com",temp:true,scope:"VA VIC 2nd pair"},
+  {id:15,name:"Andrew Chan",email:"diane.k@risk2solution.com",temp:true,scope:"VA WA 1st pair"},
+  {id:16,name:"Warren Kotkis",email:"diane.k@risk2solution.com",temp:true,scope:"VA WA 2nd pair"},
+];
+
+const SESSIONS=[
+  {id:1,name:"Security Awareness — Recurrent",start:"09:00",end:"14:00",dur:"5 hrs",trainers:"2 (see rules)",clients:"Virgin Australia",fd:false},
+  {id:2,name:"Security Awareness — Initial",start:"08:30",end:"16:30",dur:"8 hrs",trainers:"2 (see rules)",clients:"Virgin Australia",fd:false},
+  {id:3,name:"OVA (Virgin Australia)",start:"09:00",end:"13:00",dur:"3 hrs",trainers:"1 always",clients:"Virgin Australia",fd:false},
+  {id:4,name:"Manage Conflict & Unlawful Behaviour",start:"TBC",end:"TBC",dur:"6 hrs",trainers:"TBC",clients:"V/Line",fd:false},
+  {id:5,name:"Authorised Officer Training",start:"TBC",end:"TBC",dur:"2 full days",trainers:"TBC",clients:"V/Line",fd:false},
+  {id:6,name:"Emergency Management Training",start:"09:00",end:"13:00",dur:"4 hrs",trainers:"TBC",clients:"Wayss, DEECA",fd:false},
+  {id:7,name:"OVA Training",start:"09:00",end:"13:00",dur:"4 hrs",trainers:"TBC",clients:"Wayss",fd:false},
+  {id:8,name:"Chief Warden / Manage Self-Resilience",start:"09:00",end:"13:00",dur:"4 hrs",trainers:"TBC",clients:"Scentregroup",fd:false},
+  {id:9,name:"Personal Safety & Conflict Mgmt",start:"Full day",end:"—",dur:"Full day",trainers:"1",clients:"DEECA",fd:true},
+];
+
+const VA_PAIRS={
+  QLD:{pairs:[["Lawrence Phillips","Chris Walsh"],["Paul Johnston","Dan Du Plessis"]],ova:["Lawrence Phillips","Paul Johnston"],single:false},
+  NSW:{pairs:[["Mark Edmonds","Mick Haran"],["Marina Toailoa","Shane Garrett"],["Dave Cohen","TBC"]],ova:["Mark Edmonds","Marina Toailoa"],single:false},
+  VIC:{pairs:[["Ross Mackenzie","Grant McDonald"],["Dirk McLean","Adam Stone"]],ova:["Ross Mackenzie","Dirk McLean"],single:false},
+  WA:{pairs:[["Andrew Chan","Paul Johnston"],["Dave Cohen","Warren Kotkis"]],ova:["Andrew Chan","Dave Cohen"],single:false},
+  SA:{pairs:[["Dave Cohen"]],ova:["Dave Cohen"],single:true},
+  TAS:{pairs:[["TBC","TBC"]],ova:["TBC"],single:false},
+  NT:{pairs:[["TBC","TBC"]],ova:["TBC"],single:false},
+  ACT:{pairs:[["TBC","TBC"]],ova:["TBC"],single:false},
+};
+
+// Email log is now dynamic — see emailLog array
+
+let bookings=[
+  {id:1,client:"Virgin Australia",session:"Security Awareness — Recurrent",date:"2026-05-15",state:"VIC",trainers:["Ross Mackenzie","Grant McDonald"],status:"Confirmed",fd:false},
+  {id:2,client:"DEECA",session:"Personal Safety & Conflict Mgmt",date:"2026-06-10",state:"VIC",trainers:["Ross Mackenzie"],status:"Quote Pending",fd:true},
+  {id:3,client:"Scentregroup",session:"Chief Warden / Manage Self-Resilience",date:"2026-05-22",state:"SYD",trainers:["Mark Edmonds"],status:"Confirmed",fd:false},
+  {id:4,client:"Virgin Australia",session:"OVA (Virgin Australia)",date:"2026-05-28",state:"NSW",trainers:["Mark Edmonds"],status:"Confirmed",fd:false},
+];
+
+let chatHist=[], selEmail=null, bkFormOpen=false, vaOpen=false;
+
+// ─── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
+
+const SYS=`CRITICAL DATE RULE: Never respond with TBC for a date if the email or document contains dates. Extract and use the actual dates provided. Convert DD/MM/YY to readable format (05/03/26 = 5 March 2026).
+
+⚠ CRITICAL — READ THIS FIRST BEFORE PROCESSING ANY VIRGIN AUSTRALIA EMAIL OR IMAGE:
+
+RULE A — PARTICIPANT COUNTING:
+Virgin Australia tables have TWO crew columns — add both together:
+  FC (Flight Crew) + CC (Cabin Crew) = TOTAL PARTICIPANTS
+Steps for every VA row:
+  1. Read FC number
+  2. Read CC number
+  3. Add them: FC + CC = Total
+  4. Apply trainer rule to the Total (under 14 = 1 trainer, 14 or more = 2 trainers)
+Never use FC alone. Never use CC alone. Never use Max Course No. Always use FC + CC.
+Example: FC=6, CC=13 → Total=19 → 2 trainers (19 ≥ 14)
+
+RULE B — THREE DISTINCT VA SESSION TYPES — NEVER CONFUSE THEM:
+  1. RECURRENT (Recurrent FC/CC) = Security Awareness Recurrent — 09:00 to 14:00 — 5 hours
+  2. INITIAL (Initial Cabin Crew / Initial FC/CC) = Security Awareness Initial — 08:30 to 16:30 — 8 hours — NOT OVA
+  3. OVA = OVA Virgin Australia — 09:00 to 13:00 — 3 hours — ALWAYS 1 trainer — NOT Initial
+If the Course Type says Initial anything → it is Security Awareness Initial, never OVA.
+If the Course Type says OVA → it is OVA, never Initial.
+
+RULE C — KEEP EMAIL BODIES CONCISE TO AVOID RESPONSE LIMITS:
+Client confirmation email: use a simple bullet list, one line per session. Do not write paragraphs.
+Format each session as: • [Date] | [Location] | [Session Type] | [Time] | [Trainer(s)] | [Total participants]
+Trainer confirmation email: same format — one bullet per session they are assigned to.
+Keep total email body under 300 words each. Do not repeat information already in the bullet list.
+
+You are Jasmine, the AI scheduling agent for Risk 2 Solution Group. You help Diane Kock and her team manage training bookings, trainer assignments, and client communications.
+
+BUSINESS: Risk 2 Solution Group | diane.k@risk2solution.com | 1300 459 970 | +61 415 748 747 | Leopold, Victoria | AEST (UTC+10)
+
+CLIENTS (5):
+1. Virgin Australia — @virginaustralia.com
+2. V/Line — @vline.com.au
+3. DEECA — Organisational_Capability_Team@deeca.vic.gov.au
+4. Wayss — @wayss.org.au
+5. Scentregroup — @scentregroup.com
+
+SESSION TYPES (9):
+1. Security Awareness — Recurrent: 09:00-14:00, 5 hrs, 2 trainers (see rules), VA
+2. Security Awareness — Initial: 08:30-16:30, 8 hrs, 2 trainers (see rules), VA
+3. OVA (VA): 09:00-13:00, 3 hrs, 1 trainer ALWAYS, VA
+4. Manage Conflict & Unlawful Behaviour: TBC, 6 hrs, V/Line
+5. Authorised Officer Training: TBC, 2 full days, V/Line
+6. Emergency Management Training: 09:00-13:00, 4 hrs, Wayss/DEECA
+7. OVA Training: 09:00-13:00, 4 hrs, Wayss
+8. Chief Warden / Manage Self-Resilience: 09:00-13:00, 4 hrs, Scentregroup
+9. Personal Safety & Conflict Mgmt (DEECA): Full day, 1 trainer, DEECA
+
+TRAINERS (16):
+1. Ross Mackenzie — VA (all), V/Line VIC, DEECA VIC, Wayss VIC, Scentregroup VIC
+2. Dani Stevenson — VA (all states)
+3. Paul Johnston — VA QLD 2nd pair + WA 1st pair, Scentregroup QLD/WA/ACT
+4. Grant McDonald — VA VIC 1st pair, DEECA VIC, Scentregroup VIC
+5. Mark Edmonds — VA NSW 1st pair, Scentregroup SYD
+6. Dirk McLean — VA VIC 2nd pair, V/Line VIC, Scentregroup VIC
+7. Dave Cohen — VA NSW 3rd, VA WA 2nd, VA SA 1st, Scentregroup SYD/WA/ACT/SA/NZ
+8. Lawrence Phillips — VA QLD 1st pair, Scentregroup QLD
+9. Chris Walsh — VA QLD 1st pair
+10. Dan Du Plessis — VA QLD 2nd pair
+11. Mick Haran — VA NSW 1st pair
+12. Marina Toailoa — VA NSW 2nd pair
+13. Shane Garrett — VA NSW 2nd pair
+14. Adam Stone — VA VIC 2nd pair
+15. Andrew Chan — VA WA 1st pair
+16. Warren Kotkis — VA WA 2nd pair
+
+VA TRAINER PAIRS - Security Awareness (book 1st pair first; cascade if unavailable):
+QLD: 1st = Lawrence Phillips + Chris Walsh | 2nd = Paul Johnston + Dan Du Plessis
+NSW: 1st = Mark Edmonds + Mick Haran | 2nd = Marina Toailoa + Shane Garrett | 3rd = Dave Cohen + TBC
+VIC: 1st = Ross Mackenzie + Grant McDonald | 2nd = Dirk McLean + Adam Stone
+WA: 1st = Andrew Chan + Paul Johnston | 2nd = Dave Cohen + Warren Kotkis
+SA: Dave Cohen only (single trainer - SA rule always applies)
+TAS / NT / ACT: TBC
+
+VA OVA - always 1 trainer, use 1st preference by state:
+QLD: Lawrence Phillips | NSW: Mark Edmonds | VIC: Ross Mackenzie | WA: Andrew Chan | SA: Dave Cohen
+
+BOOKING RULES:
+
+VIRGIN AUSTRALIA EMAIL/TABLE FORMAT — IMPORTANT READING RULES:
+Virgin Australia sends training requests as tables with these specific columns:
+- "Requested Date of TRG" = the session date
+- "Course Type" = session type. Map as follows:
+  "Recurrent FC/CC" or "Recurrent" = Security Awareness — Recurrent (09:00–14:00, 5 hrs)
+  "Initial Cabin Crew" or "Initial FC/CC" or "Initial" = Security Awareness — Initial (08:30–16:30, 8 hrs)
+  "OVA" = OVA Virgin Australia (09:00–13:00, 3 hrs) — COMPLETELY DIFFERENT to Initial — always 1 trainer, always separate session
+  These are THREE distinct session types. Initial is NOT OVA. OVA is NOT Initial. Never confuse them.
+- "Course times" = start and end time (e.g. 0900-1400)
+- "Approx crew rostered" has TWO sub-columns:
+  FC = Flight Crew count
+  CC = Cabin Crew count
+  TOTAL PARTICIPANTS = FC + CC combined. ALWAYS add both columns together. Never use FC or CC alone.
+- "Max Course No" = maximum course capacity — do NOT use this as the participant count
+- Location codes in VA tables map to Australian states:
+  BNE = Queensland (QLD) — trainer pair: Lawrence Phillips + Chris Walsh
+  SYD = New South Wales (NSW) — trainer pair: Mark Edmonds + Mick Haran
+  MEL = Melbourne, Victoria (VIC) — trainer pair: Ross Mackenzie + Grant McDonald
+  PER = Perth, Western Australia (WA) — trainer pair: Andrew Chan + Paul Johnston
+  ADL = Adelaide, South Australia (SA) — Dave Cohen only (1 trainer always)
+  CBR = Canberra, ACT — TBC, flag for Diane
+  HBA = Hobart, Tasmania (TAS) — TBC, flag for Diane
+  DRW = Darwin, Northern Territory (NT) — TBC, flag for Diane
+- If a row is struck through or marked "Planning stage" — skip it, do not book it
+- "Risk 2 Solution Availability" column = ignore, this is for Diane to fill in
+- Apply the trainer count rule AFTER calculating the correct total: FC + CC combined
+
+BOOKING RULES:
+1. VA Security Awareness trainer count — apply this exactly every time:
+   - First calculate TOTAL participants = FC + CC combined (Virgin Australia always splits crew into two columns)
+   - Total participants 14 or more → assign 2 trainers (use the state pair)
+   - Total participants UNDER 14 (i.e. 1 through 13) → assign ONLY 1 trainer (use the 1st preference trainer for that state)
+   - Participants not stated → assume 2 trainers and flag the assumption
+   - SA state → ALWAYS 1 trainer regardless of participant count
+2. SA: ALWAYS 1 trainer for all VA session types — no exceptions, even if participants are 14 or more
+3. VA OVA: ALWAYS 1 trainer regardless of participant count
+4. DEECA: ALWAYS book as FULL DAY in calendar — mark as TENTATIVE until client approves quote
+4b. DEECA MULTIPLE CLASSES: Each class in section 2.2 is a separate booking. Use Preferred date 1 for each. NEVER use TBC when dates are in the form. Convert DD/MM/YY to readable date.
+4c. CALENDAR TIME-SLOT LOGIC (baked in for full automation):
+   When client provides "0900/1230" or flexible times:
+   Step 1 — try 09:00 on preferred date
+   Step 2 — if 09:00 unavailable, try 12:30 on same date
+   Step 3 — if both unavailable, move to Preferred date 2 and repeat
+   Until calendar connected: default to 09:00, flag as tentative, note 12:30 is alternative
+5. DEECA: ALWAYS use quote workflow — NEVER confirm bookings — use tentative language only
+5b. DEECA client email must say dates are TENTATIVELY held pending quote approval — not confirmed
+
+OTHER CLIENT PREFERENCES:
+DEECA VIC: 1st = Ross Mackenzie | 2nd = Grant McDonald
+V/Line VIC: 1st = Ross Mackenzie | 2nd = Dirk McLean
+Wayss VIC: 1st = Ross Mackenzie | 2nd = TBC
+Scentregroup: SYD=Mark Edmonds/Dave Cohen | VIC=Ross/Dirk/Grant | QLD=Paul/Lawrence | WA=Paul/Dave | ACT=Paul/Dave | SA=Dave | NZ=Dave
+
+DEECA QUOTE WORKFLOW:
+1. DEECA sends Class Request Form (.docx) to diane.k@risk2solution.com
+2. Jasmine reads form — extracts venue, dates, course name, contacts, number of classes
+3. Convert all dates from DD/MM/YY to full readable format. Never leave dates as TBC if dates are in the form.
+4. Default start time to 09:00 for all sessions (client flexible — 09:00 preferred, 12:30 if unavailable)
+5. Use Google Maps to calculate driving distance to the venue
+6. If one-way distance exceeds 100km: calculate RETURN TRIP travel cost = (one-way km x 2 - 200) x $0.88 inc GST. ALWAYS include accommodation ($207/night) and full meals ($128.85/night) for any overnight stay. Do NOT mention the origin location in the quote or email.
+7. Calculate full quote: (course cost x sessions) + (materials x sessions) + travel + accommodation + meals
+8. Complete Section 5 "Request for Service" with ALL fields populated
+9. Tentatively hold all dates in the calendar (full day blocks, marked provisional)
+10. Write client email using tentative language — dates provisionally held, NOT confirmed — include completed Section 5 in email body
+11. Note for Diane: save original .docx, paste Section 5 content into it, attach completed .docx to Outlook email before sending
+12. Present everything to Diane for review — NOTHING SENT AND NOTHING CONFIRMED YET
+13. Diane approves → send email with attached completed Word doc to Organisational_Capability_Team@deeca.vic.gov.au
+14. DEECA confirms → formally confirm calendar bookings + send trainer confirmations
+
+CALENDAR SLOT SELECTION RULE (when calendar is connected):
+- Try 09:00 first on Preferred date 1
+- If 09:00 is unavailable → try 12:30 on same date
+- If both unavailable → move to Preferred date 2, try 09:00 then 12:30
+- Continue cascading through preferred dates until a slot is found
+- Document selected slot in diane_summary
+
+DEECA SECTION 5 — "REQUEST FOR SERVICE" — COMPLETE ALL FIELDS:
+Populate quote_section5 with the fully completed form text, formatted exactly as it appears in the DEECA template:
+
+Training provider name: Risk 2 Solution Group
+Training provider email: diane.k@risk2solution.com | Ph: 1300 459 970
+Course name: Personal Safety & Conflict Management
+Facilitator name: [assigned trainer name/s — use 1st preference: Ross Mackenzie, 2nd: Grant McDonald]
+Available course date/s: [list all confirmed/preferred dates for each class]
+Class times: Start time: [09:00 or 12:30 — confirm based on availability] | Finish time: [full day end time]
+Maximum number of participants: 20 (as per contracted rates)
+Pre-requisites / Materials required: Training materials supplied by Risk 2 Solution Group
+
+Pricing table (complete all rows):
+Class cost: $1,814.55 ex GST | $1,996.00 inc GST (per session — multiply by number of sessions)
+Materials: $[36.00 x number of sessions] ex GST | $[36.00 x number of sessions] inc GST
+Travel – km (beyond first 100km): $[calculated km cost] inc GST
+Accommodation/Meals: $[calculated if applicable] inc GST
+TOTAL COST: $[sum of all above] ex GST | $[sum inc GST]
+
+Supplier confirms rates do not exceed contracted rates: YES
+
+For multiple sessions: show per-session cost AND total across all sessions.
+
+DEECA PRICING (inc GST unless stated):
+Course: $1,814.55 ex GST / $1,996.00 inc GST (per delivery)
+Materials: $36.00 per booking
+Travel: $0.88/km for return trip beyond first 200km total (100km each way free) — do not mention origin in quote
+Accommodation: $207.00/night (required whenever one-way distance exceeds 100km — assume 1 night per visit)
+Breakfast: $32.10 | Lunch: $32.80 | Dinner: $63.95 | Meals total per night: $128.85
+
+Be professional, precise and concise. For VA bookings confirm: state, session type, date, participant count. Always enforce booking rules. For DEECA always follow the quote workflow.`;
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const ini=n=>n.split(" ").map(x=>x[0]).join("").slice(0,2);
+const getKey=()=>localStorage.getItem("j_key")||"";
+const ccol=n=>n.includes("Virgin")?"#b91c1c":n.includes("V/Line")?"#1d4ed8":n.includes("DEECA")?"#15803d":n.includes("Wayss")?"#7c3aed":n.includes("Scentregroup")?"#c2410c":"#374151";
+const sspill=s=>s==="Confirmed"?"background:#dcfce7;color:#15803d;":s.includes("Tentative")?"background:#dbeafe;color:#1e40af;":s==="Quote Pending"?"background:#fef9c3;color:#854d0e;":"background:#f1f5f9;color:#475569;";
+
+// ─── TABS ─────────────────────────────────────────────────────────────────────
+
+const TLABELS={chat:"Chat",process:"Process Email",emails:"Emails",bookings:"Bookings",clients:"Clients",trainers:"Trainers",sessions:"Sessions"};
+
+function switchTab(id){
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===id));
+  document.querySelectorAll(".tp").forEach(p=>p.classList.toggle("active",p.id==="tp-"+id));
+  document.getElementById("topbar-title").textContent=TLABELS[id];
+}
+document.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>switchTab(b.dataset.tab)));
+
+// ─── CHAT ─────────────────────────────────────────────────────────────────────
+
+function addMsg(role,text){
+  const c=document.getElementById("chat-msgs");
+  const d=document.createElement("div");
+  d.className="mrow "+role;
+  d.innerHTML=role==="assistant"
+    ?`<div class="mavatar" style="background:transparent;padding:0;overflow:visible;"><svg width="30" height="30" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="11" y="2" width="22" height="20" rx="3.5" fill="none" stroke="#7f1d1d" stroke-width="1.5"/>
+  <rect x="11" y="2" width="22" height="6.5" rx="3.5" fill="#7f1d1d"/>
+  <rect x="11" y="6" width="22" height="2.5" fill="#7f1d1d"/>
+  <rect x="16" y="0.5" width="2.5" height="5" rx="1.25" fill="#7f1d1d"/>
+  <rect x="26" y="0.5" width="2.5" height="5" rx="1.25" fill="#7f1d1d"/>
+  <rect x="6" y="7" width="22" height="20" rx="3.5" fill="#1a2744" stroke="#991b1b" stroke-width="1.5"/>
+  <rect x="6" y="7" width="22" height="6.5" rx="3.5" fill="#991b1b"/>
+  <rect x="6" y="11" width="22" height="2.5" fill="#991b1b"/>
+  <rect x="11" y="5.5" width="2.5" height="5" rx="1.25" fill="#991b1b"/>
+  <rect x="21" y="5.5" width="2.5" height="5" rx="1.25" fill="#991b1b"/>
+  <rect x="1" y="12" width="22" height="22" rx="3.5" fill="#0f172a" stroke="#b91c1c" stroke-width="1.5"/>
+  <rect x="1" y="12" width="22" height="6.5" rx="3.5" fill="#b91c1c"/>
+  <rect x="1" y="16" width="22" height="2.5" fill="#b91c1c"/>
+  <rect x="6"  y="10.5" width="2.5" height="5" rx="1.25" fill="#b91c1c"/>
+  <rect x="16" y="10.5" width="2.5" height="5" rx="1.25" fill="#b91c1c"/>
+  <text x="12" y="21.5" font-family="system-ui,-apple-system,sans-serif" font-size="4.5" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.6">MAR</text>
+  <text x="6"  y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">3</text>
+  <text x="12" y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">5</text>
+  <text x="18" y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">7</text>
+  <text x="6"  y="33.5" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">10</text>
+  <circle cx="12" cy="32" r="4" fill="#b91c1c"/>
+  <text x="12" y="33.8" font-family="system-ui,-apple-system,sans-serif" font-size="5" font-weight="700" fill="white" text-anchor="middle">12</text>
+  <text x="18" y="33.5" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">14</text>
+</svg></div><div class="mbubble a">${esc(text)}</div>`
+    :`<div class="mbubble u">${esc(text)}</div>`;
+  c.appendChild(d);
+  c.scrollTop=c.scrollHeight;
+}
+
+function showTyping(){
+  const c=document.getElementById("chat-msgs");
+  const d=document.createElement("div");
+  d.className="mrow assistant";d.id="tdots";
+  d.innerHTML=`<div class="mavatar" style="background:transparent;padding:0;overflow:visible;"><svg width="30" height="30" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="11" y="2" width="22" height="20" rx="3.5" fill="none" stroke="#7f1d1d" stroke-width="1.5"/>
+  <rect x="11" y="2" width="22" height="6.5" rx="3.5" fill="#7f1d1d"/>
+  <rect x="11" y="6" width="22" height="2.5" fill="#7f1d1d"/>
+  <rect x="16" y="0.5" width="2.5" height="5" rx="1.25" fill="#7f1d1d"/>
+  <rect x="26" y="0.5" width="2.5" height="5" rx="1.25" fill="#7f1d1d"/>
+  <rect x="6" y="7" width="22" height="20" rx="3.5" fill="#1a2744" stroke="#991b1b" stroke-width="1.5"/>
+  <rect x="6" y="7" width="22" height="6.5" rx="3.5" fill="#991b1b"/>
+  <rect x="6" y="11" width="22" height="2.5" fill="#991b1b"/>
+  <rect x="11" y="5.5" width="2.5" height="5" rx="1.25" fill="#991b1b"/>
+  <rect x="21" y="5.5" width="2.5" height="5" rx="1.25" fill="#991b1b"/>
+  <rect x="1" y="12" width="22" height="22" rx="3.5" fill="#0f172a" stroke="#b91c1c" stroke-width="1.5"/>
+  <rect x="1" y="12" width="22" height="6.5" rx="3.5" fill="#b91c1c"/>
+  <rect x="1" y="16" width="22" height="2.5" fill="#b91c1c"/>
+  <rect x="6"  y="10.5" width="2.5" height="5" rx="1.25" fill="#b91c1c"/>
+  <rect x="16" y="10.5" width="2.5" height="5" rx="1.25" fill="#b91c1c"/>
+  <text x="12" y="21.5" font-family="system-ui,-apple-system,sans-serif" font-size="4.5" font-weight="700" fill="white" text-anchor="middle" letter-spacing="0.6">MAR</text>
+  <text x="6"  y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">3</text>
+  <text x="12" y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">5</text>
+  <text x="18" y="29" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">7</text>
+  <text x="6"  y="33.5" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">10</text>
+  <circle cx="12" cy="32" r="4" fill="#b91c1c"/>
+  <text x="12" y="33.8" font-family="system-ui,-apple-system,sans-serif" font-size="5" font-weight="700" fill="white" text-anchor="middle">12</text>
+  <text x="18" y="33.5" font-family="system-ui,-apple-system,sans-serif" font-size="5" fill="#475569" text-anchor="middle">14</text>
+</svg></div><div class="tdots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+  c.appendChild(d);c.scrollTop=c.scrollHeight;
+}
+
+function rmTyping(){const e=document.getElementById("tdots");if(e)e.remove();}
+
+function setSug(t){document.getElementById("chat-input").value=t;document.getElementById("chat-input").focus();}
+
+async function sendMsg(){
+  const inp=document.getElementById("chat-input");
+  const txt=inp.value.trim();
+  if(!txt)return;
+  const key=getKey();
+  if(!key){openSettings();return;}
+  addMsg("user",txt);
+  chatHist.push({role:"user",content:txt});
+  inp.value="";
+  const btn=document.getElementById("send-btn");
+  btn.disabled=true;
+  showTyping();
+  try{
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:16000,system:SYS,messages:chatHist})
+    });
+    const d=await res.json();
+    if(d.error)throw new Error(d.error.message);
+    const reply=d.content?.[0]?.text||"Sorry, I could not process that.";
+    chatHist.push({role:"assistant",content:reply});
+    rmTyping();addMsg("assistant",reply);
+  }catch(e){
+    rmTyping();addMsg("assistant","Error: "+(e.message||"Connection failed. Please check your API key in Settings."));
+  }
+  btn.disabled=false;
+}
+
+document.getElementById("chat-input").addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg();}
+});
+
+// ─── EMAIL LOG ────────────────────────────────────────────────────────────────
+
+let emailLog = [];
+let emailLogFilter = "all";
+
+function logProcessedEmail(j, rawInput){
+  const bks = j.bookings || (j.action_type ? [j] : []);
+  const client = bks.length ? (bks[0].client || "Unknown") : "Unknown";
+  const entry = {
+    id: Date.now(),
+    timestamp: new Date().toLocaleString("en-AU",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}),
+    client: client,
+    sessionCount: bks.length,
+    summary: j.diane_summary || (bks.length + " session(s) processed"),
+    sessions: bks.map(b => b.session_type + (b.date?" — "+b.date:"")),
+    raw: j
+  };
+  emailLog.unshift(entry);
+  renderEmailLog();
+}
+
+function filterEmailLog(client){
+  emailLogFilter = client;
+  document.querySelectorAll(".el-filter").forEach(b => b.classList.toggle("active", b.dataset.client===client));
+  renderEmailLog();
+}
+
+function renderEmailLog(){
+  const filtered = emailLogFilter==="all" ? emailLog : emailLog.filter(e=>e.client===emailLogFilter);
+  const countEl = document.getElementById("email-log-count");
+  if(countEl) countEl.textContent = emailLog.length + " email" + (emailLog.length!==1?"s":"") + " processed";
+  const list = document.getElementById("email-log-list");
+  if(!list) return;
+  if(!filtered.length){
+    list.innerHTML = '<div style="text-align:center;padding:40px 20px;color:#94a3b8;font-size:13px;">No emails for this client yet.</div>';
+    return;
+  }
+  const clientColors = {"Virgin Australia":["#fef2f2","#b91c1c"],"V/Line":["#eff6ff","#1d4ed8"],"DEECA":["#f0fdf4","#15803d"],"Wayss":["#f5f3ff","#7c3aed"],"Scentregroup":["#fff7ed","#c2410c"]};
+  list.innerHTML = filtered.map(e => {
+    const [bg,fg] = clientColors[e.client] || ["#f1f5f9","#475569"];
+    return `<div class="email-log-row" onclick="viewEmailLogEntry(${e.id})">
+      <div class="email-log-top">
+        <span class="email-log-client" style="background:${bg};color:${fg};">${esc(e.client)}</span>
+        <span style="font-size:12px;font-weight:500;color:#0f172a;">${e.sessionCount} session${e.sessionCount!==1?"s":""} processed</span>
+        <span class="email-log-date">${e.timestamp}</span>
+      </div>
+      <div class="email-log-summary">${esc(e.summary)}</div>
+      <div class="email-log-sessions">${e.sessions.map(s=>`<span class="email-log-session-tag">${esc(s)}</span>`).join("")}</div>
+    </div>`;
+  }).join("");
+}
+
+function viewEmailLogEntry(id){
+  const entry = emailLog.find(e=>e.id===id);
+  if(!entry) return;
+  switchTab("process");
+  renderProcessResults(entry.raw, "");
+}
+
+// ─── BOOKINGS ─────────────────────────────────────────────────────────────────
+
+function renderBookings(){
+  document.getElementById("bk-count").textContent=bookings.length+" bookings";
+  document.getElementById("bk-list").innerHTML=bookings.map(b=>`
+    <div class="bk-row${b.fd?" fd":""}" onclick="openBkDetail(${b.id})">
+      <div class="bk-ico ${b.fd?"f":"r"}">${b.fd?"📅":"🕘"}</div>
+      <div class="bk-info">
+        <div class="bk-sess">${esc(b.session)}</div>
+        <div class="bk-meta">${esc(b.client)} · ${b.state} · ${b.date}${b.fd?" · Full Day ⚠":""}</div>
+        <div class="bk-tr">${b.trainers.join(", ")}</div>
+      </div>
+      <span class="sp" style="${sspill(b.status)}">${b.status}</span>
+    </div>`).join("");
+}
+
+function toggleBkForm(){
+  bkFormOpen=!bkFormOpen;
+  const w=document.getElementById("bk-form-wrap");
+  if(bkFormOpen){
+    w.innerHTML=`<div class="bk-form">
+      <div style="font-weight:600;font-size:14px;color:#0f172a;margin-bottom:14px;">New Booking</div>
+      <div class="fg">
+        <select class="fi" id="bf-cl"><option value="">Select client</option>${CLIENTS.map(c=>`<option value="${c.name}">${c.name}</option>`).join("")}</select>
+        <select class="fi" id="bf-se"><option value="">Select session type</option>${SESSIONS.map(s=>`<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("")}</select>
+        <input type="date" class="fi" id="bf-dt">
+        <input type="text" class="fi" id="bf-st" placeholder="State (VIC, NSW, QLD…)">
+        <input type="number" class="fi" id="bf-pc" placeholder="Participant count (VA)">
+      </div>
+      <div id="bf-warn"></div>
+      <div class="btn-row"><button class="btn btn-s" onclick="toggleBkForm()">Cancel</button><button class="btn btn-p" onclick="createBk()">Create Booking</button></div>
+    </div>`;
+    document.getElementById("bf-cl").addEventListener("change",function(){
+      document.getElementById("bf-warn").innerHTML=this.value==="DEECA"
+        ?`<div class="alert w" style="margin-bottom:12px;">⚠ DEECA bookings require quote approval first — complete the quote workflow via Chat tab.</div>`:"";
+    });
+  }else{w.innerHTML="";}
+}
+
+function createBk(){
+  const cl=document.getElementById("bf-cl").value,se=document.getElementById("bf-se").value,dt=document.getElementById("bf-dt").value,st=document.getElementById("bf-st").value;
+  if(!cl||!se||!dt)return;
+  bookings.push({id:Date.now(),client:cl,session:se,date:dt,state:st||"TBC",trainers:["TBC"],status:"Pending",fd:cl==="DEECA"});
+  toggleBkForm();renderBookings();
+}
+
+// ─── CLIENTS ──────────────────────────────────────────────────────────────────
+
+function renderClients(){
+  document.getElementById("cl-grid").innerHTML=CLIENTS.map(c=>`
+    <div class="card">
+      <div class="card-header" style="background:${c.color};">
+        <div class="card-ico">${c.short}</div>
+        <div><div class="card-title">${c.name}</div><div class="card-sub">${c.state}</div></div>
+      </div>
+      <div class="card-body">
+        <div class="mlbl">EMAIL DOMAIN</div>
+        <div class="mval"><span class="mono">${c.domain}</span></div>
+        <div class="mlbl">NOTES</div>
+        <div class="mval">${esc(c.notes)}</div>
+        ${c.id==="de"?`<div class="mlbl">PRICING</div><div class="mval">$1,996 inc GST per delivery · $0.88/km travel beyond 100km from Leopold</div>`:""}
+      </div>
+    </div>`).join("");
+}
+
+// ─── TRAINERS ─────────────────────────────────────────────────────────────────
+
+function renderTr(filter=""){
+  const fl=filter.toLowerCase();
+  const rows=TRAINERS.filter(t=>!fl||t.name.toLowerCase().includes(fl)||t.scope.toLowerCase().includes(fl));
+  document.getElementById("tr-rows").innerHTML=rows.map(t=>`
+    <div class="tr-row">
+      <div class="tr-av">${ini(t.name)}</div>
+      <div><div class="tr-name">${esc(t.name)}</div>${t.temp?`<span class="temp-b">temp email</span>`:""}</div>
+      <div class="tr-scope">${esc(t.scope)}</div>
+      <div class="tr-em">${t.id<=3?"✓ confirmed":"temp"}</div>
+    </div>`).join("");
+}
+
+function filterTr(){renderTr(document.getElementById("tr-search").value);}
+
+function toggleVA(){
+  vaOpen=!vaOpen;
+  document.getElementById("va-btn").textContent="VA Pairs "+(vaOpen?"▲":"▼");
+  const w=document.getElementById("va-wrap");
+  if(vaOpen){
+    w.style.display="block";
+    w.innerHTML=`<div class="va-panel">
+      <div style="font-weight:600;font-size:13px;color:#0f172a;">Virgin Australia — Trainer Pairs by State</div>
+      <div class="va-grid">
+        ${Object.entries(VA_PAIRS).map(([st,d])=>`
+          <div class="va-sc">
+            <div class="va-st">${st}${d.single?" — 1 trainer":""}</div>
+            ${d.pairs.map((p,i)=>`<div class="va-pr"><span class="va-pn">#${i+1} </span>${esc(p.join(" + "))}</div>`).join("")}
+            <div class="va-ova">OVA: ${esc(d.ova[0])}</div>
+          </div>`).join("")}
+      </div>
+    </div>`;
+  }else{w.style.display="none";w.innerHTML="";}
+}
+
+// ─── SESSIONS ─────────────────────────────────────────────────────────────────
+
+function renderSess(){
+  document.getElementById("sess-grid").innerHTML=SESSIONS.map(s=>`
+    <div class="sess-card${s.fd?" fd":""}">
+      ${s.fd?`<span class="fd-badge">FULL DAY</span>`:""}
+      ${s.requiresQuote?`<span class="fd-badge" style="background:#f0fdf4;color:#15803d;right:auto;left:12px;">QUOTE REQ</span>`:""}  
+      <div class="sess-name">${esc(s.name)}</div>
+      <div class="sess-meta">
+        <div><div class="mlbl">START</div><div class="mval" style="font-size:12px;">${s.start}</div></div>
+        <div><div class="mlbl">END</div><div class="mval" style="font-size:12px;">${s.end}</div></div>
+        <div><div class="mlbl">DURATION</div><div class="mval" style="font-size:12px;">${s.dur}</div></div>
+        <div><div class="mlbl">TRAINERS</div><div class="mval" style="font-size:12px;">${s.trainers}</div></div>
+      </div>
+      <div style="border-top:1px solid #f1f5f9;padding-top:10px;">
+        <div class="mlbl">CLIENTS</div>
+        ${s.clients.split(", ").map(cl=>`<span class="cpill" style="color:${ccol(cl)};">${cl}</span>`).join("")}
+      </div>
+    </div>`).join("");
+}
+
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+
+function openSettings(){document.getElementById("api-input").value=getKey();document.getElementById("settings-mo").classList.add("open");}
+function closeSettings(){document.getElementById("settings-mo").classList.remove("open");}
+function saveSettings(){const k=document.getElementById("api-input").value.trim();if(k)localStorage.setItem("j_key",k);else localStorage.removeItem("j_key");closeSettings();}
+document.getElementById("settings-mo").addEventListener("click",e=>{if(e.target===document.getElementById("settings-mo"))closeSettings();});
+
+
+// ─── PROCESS EMAIL SYSTEM PROMPT ──────────────────────────────────────────────
+
+const PROC_SYS=`RESPOND WITH VALID JSON ONLY. Start with { end with }. No text outside JSON. No preamble. No explanations. Never.
+
+FORBIDDEN: Do not write "TBC" in date or session_start fields when dates/times are available in the source material.
+
+BUSINESS: Risk 2 Solution Group | diane.k@risk2solution.com | 1300 459 970 | Brisbane, Australia
+DEECA DISTANCE ORIGIN (only for DEECA travel costs): Leopold VIC
+
+CLIENTS & DOMAINS:
+@virginaustralia.com=Virgin Australia | @vline.com.au=V/Line | @deeca.vic.gov.au=DEECA | @wayss.org.au=Wayss | @scentregroup.com=Scentregroup
+
+SESSION TYPES & TIMES:
+1. Security Awareness Recurrent: 09:00-14:00 | VA only
+2. Security Awareness Initial: 08:30-16:30 | VA only
+3. OVA Virgin Australia: 09:00-13:00 | VA only | ALWAYS 1 trainer | NOT the same as Initial
+4. Manage Conflict & Unlawful Behaviour: TBC | V/Line
+5. Authorised Officer Training: TBC | V/Line
+6. Emergency Management Training: 09:00-13:00 | Wayss/DEECA
+7. OVA Training: 09:00-13:00 | Wayss
+8. Chief Warden/Manage Self-Resilience: 09:00-13:00 | Scentregroup
+9. Personal Safety & Conflict Mgmt: 09:00-13:00 | DEECA | full_day=true
+
+VA PARTICIPANT RULE — CRITICAL:
+FC + CC = TOTAL. Never use FC or CC alone. Never use Max Course No.
+Total >=14 = 2 trainers. Total <14 = 1 trainer. SA = always 1 trainer.
+
+VA TRAINER PAIRS (Security Awareness — 1st pair first, cascade if unavailable):
+QLD: Lawrence Phillips + Chris Walsh | 2nd: Paul Johnston + Dan Du Plessis
+NSW: Mark Edmonds + Mick Haran | 2nd: Marina Toailoa + Shane Garrett | 3rd: Dave Cohen + TBC
+VIC: Ross Mackenzie + Grant McDonald | 2nd: Dirk McLean + Adam Stone
+WA: Andrew Chan + Paul Johnston | 2nd: Dave Cohen + Warren Kotkis
+SA: Dave Cohen (always 1 trainer)
+
+VA OVA (always 1 trainer): QLD=Lawrence Phillips | NSW=Mark Edmonds | VIC=Ross Mackenzie | WA=Andrew Chan | SA=Dave Cohen
+
+VA AIRPORT CODES: BNE=QLD | SYD=NSW | MEL=VIC | PER=WA | ADL=SA | CBR=ACT | HBA=TAS | DRW=NT
+VA COURSE TYPES: "Recurrent FC/CC"=Security Awareness Recurrent | "Initial Cabin Crew"=Security Awareness Initial (NOT OVA) | "OVA"=OVA Virgin Australia (NOT Initial)
+
+OTHER TRAINER PREFERENCES:
+DEECA/Wayss/V-Line VIC: 1st Ross Mackenzie | 2nd Grant McDonald (DEECA) or Dirk McLean (V-Line/Wayss)
+Scentregroup: SYD=Mark Edmonds | VIC=Ross Mackenzie | QLD/WA/ACT=Paul Johnston | SA/NZ=Dave Cohen
+
+DATE RULES — MANDATORY:
+- ALWAYS extract real dates from the email/document. NEVER write TBC if a date exists in the source.
+- DD/MM/YY format: convert to readable (05/03/26 = 5 March 2026)
+- DEECA section 2.2: each Class 1/2/3/4 is a separate booking — use Preferred date 1 row for each
+- "0900/1230" = client prefers 09:00, accepts 12:30 if 09:00 unavailable (ONE session, not two)
+- Calendar logic (current): book 09:00 as default, flag "12:30 available if 09:00 conflicts"
+- Calendar logic (when connected): check 09:00 first, if taken try 12:30, if taken cascade to next preferred date
+
+BOOKING RULES:
+1. VA Security Awareness: 2 trainers if FC+CC >=14, else 1 trainer
+2. SA: always 1 trainer for all VA sessions
+3. VA OVA: always 1 trainer regardless of participant count
+4. DEECA: full_day=true, action_type="deeca_quote", needs_approval=true always
+5. DEECA tentative: book dates as TENTATIVE — never confirm with client, use tentative language only
+6. All emails need Diane approval — needs_approval=true for every booking
+7. TAS/NT/ACT VA: flag for Diane — trainers TBC
+
+DEECA PRICING (inc GST): Course $1,996 per session | Materials $36 per session | Travel $0.88/km return trip beyond 200km total | Accommodation $207/night (if >100km one-way) | Meals $128.85/night
+
+DEECA SECTION 5 — populate all fields using EXACT placeholder names below.
+These placeholders match the Word template exactly and are used by Power Automate to fill the document automatically.
+
+TEMPLATE PLACEHOLDERS — populate each field in quote_section5_fields object:
+  TRAINER_NAME: assigned trainer (Ross Mackenzie 1st, Grant McDonald 2nd)
+  CLASS_DATES: all session dates listed one per line (e.g. "5 March 2026\n11 March 2026\n17 March 2026")
+  START_TIME: session start time (default 09:00)
+  FINISH_TIME: session finish time (default 13:00)
+  CLASS_COST_EX: course cost ex GST ($1,814.55 x number of sessions, formatted as $X,XXX.XX)
+  CLASS_COST_INC: course cost inc GST ($1,996.00 x number of sessions, formatted as $X,XXX.XX)
+  MATERIALS_EX: materials ex GST ($32.73 x sessions, formatted as $XXX.XX)
+  MATERIALS_INC: materials inc GST ($36.00 x sessions, formatted as $XXX.XX)
+  TRAVEL_KM: travel cost inc GST — calculate as: (return trip total km - 200) x $0.88. Show as "$XXX.XX" or "$0.00" if total return distance is under 200km. Do not mention Leopold in the value — just the dollar amount.
+  ACCOM_MEALS: accommodation and meals total inc GST, or "$0.00" if not applicable
+  TOTAL_EX: sum of all costs ex GST, formatted as $X,XXX.XX
+  TOTAL_INC: sum of all costs inc GST, formatted as $X,XXX.XX
+  DATE_PREPARED: today's date (e.g. "24 April 2026")
+
+Also populate quote_section5 as plain readable text (for display in the UI green box).
+Also populate quote_total as a number (total inc GST as float).
+
+DEECA CLIENT EMAIL:
+- client_email_to: organisational_capability_team@deeca.vic.gov.au
+- Use tentative language ONLY — dates are provisionally held pending quote approval
+- List each class as a bullet: date | venue | session type | trainer | start time
+- Do NOT include Section 5 or any pricing in the client email body
+- End with: "Please find the completed Request for Service (Section 5) attached. Kindly review and confirm your approval so we can proceed to formally confirm these dates."
+- Sign off with the standard sign-off
+- Section 5 is provided separately in quote_section5 for Diane to paste into the Word doc and attach
+
+VA LOCATION DETAILS (include in trainer emails and calendar):
+MEL: Gate 26 South Centre Rd Tullamarine VIC 3043 | Ph 03 8346 3242 | Intercom for crew training centre, contact Christine Battershill. Free parking. Printing in admin office. WIFI via VA admin.
+SYD: 2/476 Gardeners Rd Alexandria NSW 2015 | Ph 02 9352 7649 | Front door on O'Riordan St. Parking swipe from Training Centre Office for underground carpark. Printing in Training Centre Office.
+BNE: 3 Melia St Eagle Farm QLD 4009 | Ph 07 3860 0500 | Check in at reception as guest. Free parking. Printing in admin office.
+PER: Jandakot Training Facility Perth WA | Ph TBC | Confirm access with VA ops.
+ADL: Adelaide SA | Address TBC | Confirm with VA ops.
+
+EMAIL SIGN-OFF (all emails):
+Kind Regards
+Diane Kruger
+Corporate Operations Lead
+Risk 2 Solution Group
+1300 459 970
+
+EMAIL RULES:
+- client_email_body: professional, bullet list (one line per session), under 200 words, include sign-off
+- trainer_email_body: address trainer by first name, one bullet per session, include location details and sign-off
+- DEECA: client email is tentative language only — never say "confirmed" — include Section 5 below sign-off
+- trainer_emails: array of {trainer_names, trainer_email_to, trainer_email_subject, trainer_email_body}
+
+OUTPUT — return exactly this JSON structure:
+{
+  "bookings": [
+    {
+      "action_type": "booking OR deeca_quote OR conflict OR unknown",
+      "client": "",
+      "session_type": "",
+      "date": "REAL DATE — never TBC if date exists in source",
+      "state": "",
+      "venue": "",
+      "participants": 0,
+      "trainers": [],
+      "trainer_count": 0,
+      "session_start": "09:00",
+      "session_end": "13:00",
+      "full_day": false,
+      "rules_applied": [],
+      "calendar_title": "",
+      "calendar_note": "",
+      "flags": []
+    }
+  ],
+  "client_email_to": "",
+  "client_email_subject": "",
+  "client_email_body": "",
+  "trainer_emails": [
+    {
+      "trainer_names": [],
+      "trainer_email_to": [],
+      "trainer_email_subject": "",
+      "trainer_email_body": ""
+    }
+  ],
+  "quote_section5": "plain text version of Section 5 for display",
+  "quote_section5_fields": {
+    "TRAINER_NAME": "",
+    "CLASS_DATES": "",
+    "START_TIME": "09:00",
+    "FINISH_TIME": "13:00",
+    "CLASS_COST_EX": "$0.00",
+    "CLASS_COST_INC": "$0.00",
+    "MATERIALS_EX": "$0.00",
+    "MATERIALS_INC": "$0.00",
+    "TRAVEL_KM": "$0.00",
+    "ACCOM_MEALS": "$0.00",
+    "TOTAL_EX": "$0.00",
+    "TOTAL_INC": "$0.00",
+    "DATE_PREPARED": ""
+  },
+  "quote_total": 0,
+  "diane_summary": "",
+  "overall_flags": []
+}`;
+
+
+
+
+// ─── DOCUMENT FILE HANDLER (Word/Excel) ───────────────────────────────────────
+
+window._attachedDocText = "";
+
+async function handleDocSelect(e){
+  const file=e.target.files[0];
+  if(file) await loadDocFile(file);
+}
+
+async function loadDocFile(file){
+  const zone=document.getElementById("doc-drop-zone");
+  const lbl=document.getElementById("doc-dz-label");
+  lbl.textContent="Reading "+file.name+"…";
+  try{
+    const ext=file.name.split('.').pop().toLowerCase();
+    if(ext==='docx'&&typeof mammoth!=="undefined"){
+      const buf=await file.arrayBuffer();
+      const res=await mammoth.extractRawText({arrayBuffer:buf});
+      window._attachedDocText=res.value||"";
+      zone.classList.add("loaded");
+      lbl.textContent="✓ "+file.name+" — "+window._attachedDocText.length+" characters read";
+    } else if(ext==='txt'||ext==='csv'){
+      window._attachedDocText=await file.text();
+      zone.classList.add("loaded");
+      lbl.textContent="✓ "+file.name+" attached";
+    } else if(ext==='xlsx'||ext==='xls'){
+      // Read as text for basic content
+      window._attachedDocText="[Excel file: "+file.name+" — "+file.size+" bytes. Key content will be extracted from visible text.]";
+      zone.classList.add("loaded");
+      lbl.textContent="✓ "+file.name+" attached (Excel)";
+    } else {
+      window._attachedDocText=await file.text();
+      zone.classList.add("loaded");
+      lbl.textContent="✓ "+file.name+" attached";
+    }
+  }catch(err){
+    lbl.textContent="Could not read "+file.name+" — try a different format";
+    console.error(err);
+  }
+}
+
+// ─── IMAGE ATTACHMENT HANDLING ─────────────────────────────────────────────────
+
+let attachedImageB64 = null;
+let attachedImageType = null;
+
+function handleImgSelect(e){
+  const file = e.target.files[0];
+  if(file) loadImgFile(file);
+}
+
+function loadImgFile(file){
+  const zone = document.getElementById("img-attach-zone");
+  const lbl = document.getElementById("iaz-label");
+  const preview = document.getElementById("iaz-preview");
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const dataUrl = e.target.result;
+    // Extract base64 and mime type
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if(match){
+      attachedImageType = match[1];
+      attachedImageB64 = match[2];
+      zone.classList.add("loaded");
+      lbl.textContent = "✓ " + file.name + " attached — Jasmine will read it";
+      preview.src = dataUrl;
+      preview.classList.add("show");
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─── EMAIL FILE HANDLING ───────────────────────────────────────────────────────
+
+function handleFileSelect(e){
+  const file = e.target.files[0];
+  if(file) loadEmailFile(file);
+}
+
+function loadEmailFile(file){
+  const dz = document.getElementById("drop-zone");
+  const lbl = document.getElementById("dz-label");
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const raw = e.target.result;
+    const parsed = parseEml(raw);
+    document.getElementById("proc-input").value = parsed;
+    dz.classList.add("loaded");
+    lbl.textContent = "✓ " + file.name + " loaded";
+  };
+  reader.onerror = function(){
+    lbl.textContent = "Could not read file — try pasting the email instead";
+  };
+  reader.readAsText(file);
+}
+
+function parseEml(raw){
+  // Extract .docx attachments BEFORE stripping base64
+  // This allows Jasmine to read Word documents embedded in emails
+  const docxMatches = [];
+  const docxNameRe = /filename="([^"]*\.docx)"/gi;
+  let docxNameMatch;
+  while((docxNameMatch = docxNameRe.exec(raw)) !== null){
+    // Find the base64 content block after this filename
+    const afterName = raw.indexOf('\n\n', docxNameMatch.index);
+    if(afterName === -1) continue;
+    const nextBoundary = raw.indexOf('\n--', afterName);
+    const b64block = raw.slice(afterName+2, nextBoundary>-1?nextBoundary:afterName+800000)
+      .replace(/\s/g,'');
+    if(b64block.length > 100){
+      docxMatches.push({name: docxNameMatch[1], b64: b64block});
+    }
+  }
+
+  // Store docx attachments for async processing after parsing
+  if(docxMatches.length > 0){
+    window._pendingDocxAttachments = docxMatches;
+  } else {
+    window._pendingDocxAttachments = [];
+  }
+
+  // Pre-strip: remove large base64 blocks (images etc) — but keep docx content label
+  raw = raw.replace(/(?:[A-Za-z0-9+/=]{60,}\r?\n){4,}/g, '[base64 attachment removed]\n');
+
+  // Split headers from body
+  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
+  const blankLine = nl + nl;
+  const splitAt = raw.indexOf(blankLine);
+  const headerBlock = splitAt > -1 ? raw.slice(0, splitAt) : raw;
+  const bodyBlock = splitAt > -1 ? raw.slice(splitAt + blankLine.length) : "";
+
+  // Extract key headers
+  const getHeader = (name) => {
+    const re = new RegExp('^' + name + ':\\s*(.+?)(?=' + nl + '[^\\s]|$)', 'im');
+    const m = headerBlock.match(re);
+    return m ? m[1].replace(/\r?\n\s+/g, ' ').trim() : '';
+  };
+  const from    = getHeader('From');
+  const to      = getHeader('To');
+  const subject = getHeader('Subject');
+  const date    = getHeader('Date');
+  const ct      = getHeader('Content-Type');
+
+  // Detect and decode body
+  let body = bodyBlock;
+  const isB64 = /Content-Transfer-Encoding:\s*base64/i.test(headerBlock);
+  const isQP  = /Content-Transfer-Encoding:\s*quoted-printable/i.test(headerBlock);
+  const isHtml = /text\/html/i.test(ct);
+  const isMultipart = /multipart/i.test(ct);
+
+  if(isMultipart){
+    // Extract plain text part from multipart
+    const boundaryM = ct.match(/boundary=["']?([^"';\r\n]+)/i);
+    if(boundaryM){
+      const bound = '--' + boundaryM[1].replace(/\s+$/,'');
+      const parts = bodyBlock.split(new RegExp(bound + '-*'));
+      for(const part of parts){
+        if(/Content-Type:\s*text\/plain/i.test(part)){
+          const partSplit = part.indexOf(blankLine);
+          body = partSplit > -1 ? part.slice(partSplit + blankLine.length) : part;
+          // decode if needed
+          if(/Content-Transfer-Encoding:\s*base64/i.test(part)){
+            try{ body = atob(body.replace(/\s/g,'')); }catch(e){}
+          } else if(/Content-Transfer-Encoding:\s*quoted-printable/i.test(part)){
+            body = decodeQP(body);
+          }
+          break;
+        }
+      }
+      // fallback: try HTML part and strip tags
+      if(!body.trim()){
+        for(const part of parts){
+          if(/Content-Type:\s*text\/html/i.test(part)){
+            const partSplit = part.indexOf(blankLine);
+            let hbody = partSplit > -1 ? part.slice(partSplit + blankLine.length) : part;
+            if(/Content-Transfer-Encoding:\s*base64/i.test(part)){
+              try{ hbody = atob(hbody.replace(/\s/g,'')); }catch(e){}
+            }
+            body = stripHtml(hbody);
+            break;
+          }
+        }
+      }
+    }
+  } else if(isB64){
+    try{ body = atob(body.replace(/\s/g,'')); }catch(e){}
+    if(isHtml) body = stripHtml(body);
+  } else if(isQP){
+    body = decodeQP(body);
+    if(isHtml) body = stripHtml(body);
+  } else if(isHtml){
+    body = stripHtml(body);
+  }
+
+  body = body.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
+
+  // Build readable output for Jasmine
+  const lines = [];
+  if(from)    lines.push('From: ' + from);
+  if(to)      lines.push('To: ' + to);
+  if(subject) lines.push('Subject: ' + subject);
+  if(date)    lines.push('Date: ' + date);
+  if(lines.length) lines.push('');
+  lines.push(body);
+  return lines.join('\n');
+}
+
+function decodeQP(str){
+  return str
+    .replace(/=\r?\n/g,'')
+    .replace(/=([0-9A-Fa-f]{2})/g, (_,h) => String.fromCharCode(parseInt(h,16)));
+}
+
+function stripHtml(html){
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi,'')
+    .replace(/<script[\s\S]*?<\/script>/gi,'')
+    .replace(/<br\s*\/?>/gi,'\n')
+    .replace(/<\/p>/gi,'\n\n')
+    .replace(/<\/div>/gi,'\n')
+    .replace(/<[^>]+>/g,'')
+    .replace(/&nbsp;/g,' ')
+    .replace(/&amp;/g,'&')
+    .replace(/&lt;/g,'<')
+    .replace(/&gt;/g,'>')
+    .replace(/&quot;/g,'"')
+    .replace(/&#39;/g,"'")
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
+}
+
+// ─── DRAG AND DROP ─────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', function(){
+  const dz = document.getElementById('drop-zone');
+  if(!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if(file) loadEmailFile(file);
+  });
+
+  const iz = document.getElementById('img-attach-zone');
+  if(iz){
+    iz.addEventListener('dragover', e => { e.preventDefault(); iz.classList.add('drag-over'); });
+    iz.addEventListener('dragleave', () => iz.classList.remove('drag-over'));
+    iz.addEventListener('drop', e => {
+      e.preventDefault();
+      iz.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if(file) loadImgFile(file);
+    });
+  }
+  const dz2 = document.getElementById('doc-drop-zone');
+  if(dz2){
+    dz2.addEventListener('dragover', e => { e.preventDefault(); dz2.style.borderColor='#15803d'; dz2.style.background='#dcfce7'; });
+    dz2.addEventListener('dragleave', () => { dz2.style.borderColor='#15803d'; dz2.style.background='#f0fdf4'; });
+    dz2.addEventListener('drop', e => {
+      e.preventDefault();
+      dz2.style.borderColor='#15803d'; dz2.style.background='#f0fdf4';
+      const file = e.dataTransfer.files[0];
+      if(file) loadDocFile(file);
+    });
+  }
+});
+
+
+// ─── PROCESS EMAIL FUNCTIONS ───────────────────────────────────────────────────
+
+async function processEmail(){
+  const raw=document.getElementById("proc-input").value.trim();
+  const hasDoc=window._attachedDocText&&window._attachedDocText.trim();
+  if(!raw&&!hasDoc){alert("Please paste an email, attach an email file, or attach the booking form.");return;}
+  const key=getKey();
+  if(!key){openSettings();return;}
+  const btn=document.getElementById("proc-btn");
+  const hint=document.getElementById("proc-hint");
+  btn.disabled=true; btn.textContent="Processing…";
+  hint.textContent="Jasmine is reading the email and booking form…";
+  document.getElementById("proc-results").innerHTML='<div class="proc-empty"><div class="dot-train" style="margin-bottom:14px;"><span></span><span></span><span></span></div><div>Jasmine is reading and processing all attached content…</div></div>';
+  try{
+    // ── Extract .docx from .eml if attached as email ──────────────────────
+    let emlDocxText="";
+    const pendingDocx=window._pendingDocxAttachments||[];
+    if(pendingDocx.length>0&&typeof mammoth!=="undefined"){
+      for(const docx of pendingDocx){
+        try{
+          const bin=atob(docx.b64),bytes=new Uint8Array(bin.length);
+          for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+          const res=await mammoth.extractRawText({arrayBuffer:bytes.buffer});
+          if(res.value&&res.value.trim()) emlDocxText+="\n\n=== "+docx.name+" (from email) ===\n"+res.value.trim();
+        }catch(e){}
+      }
+    }
+    // ── Separately attached document takes priority ───────────────────────
+    const docText=hasDoc?window._attachedDocText:emlDocxText;
+    // ── Build content: email context + full document ──────────────────────
+    const emailPart=raw.slice(0,4000);
+    const docPart=docText.slice(0,20000);
+    const combined=emailPart+(docPart?"\n\n=== ATTACHED BOOKING FORM ===\n"+docPart:"");
+    // ── Image content if attached ─────────────────────────────────────────
+    let msgContent;
+    if(attachedImageB64&&attachedImageType){
+      msgContent=[
+        {type:"image",source:{type:"base64",media_type:attachedImageType,data:attachedImageB64}},
+        {type:"text",text:combined}
+      ];
+    } else {
+      msgContent=combined;
+    }
+    // ── Single API call ───────────────────────────────────────────────────
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:8000,system:PROC_SYS,messages:[{role:"user",content:msgContent}]})
+    });
+    const d=await res.json();
+    if(d.error) throw new Error(d.error.message);
+    const text=d.content?.[0]?.text||"{}";
+    let j;
+    try{
+      let clean=text.replace(/```json|```/g,"").trim();
+      if(!clean.startsWith("{")) throw new Error("Response was not JSON: "+clean.slice(0,120));
+      j=JSON.parse(clean);
+    }catch(parseErr){
+      const cutAt=Math.max(text.lastIndexOf('"}'),text.lastIndexOf('}]'));
+      if(cutAt>100){
+        try{
+          const partial=text.slice(0,cutAt+2);
+          const diff=(partial.match(/[\[{]/g)||[]).length-(partial.match(/[\]}]/g)||[]).length;
+          const closing=partial.includes('"bookings"')&&!partial.includes('"client_email_to"')
+            ?'],"client_email_to":"","client_email_subject":"","client_email_body":"","trainer_emails":[],"quote_section5":"","quote_total":0,"diane_summary":"Response truncated.","overall_flags":["Response cut short — try again"]}'
+            :"}".repeat(Math.max(0,diff));
+          j=JSON.parse(partial+closing);
+        }catch(e2){throw parseErr;}
+      }else{throw parseErr;}
+    }
+    // ── JS safety net: fill TBC dates from document text ─────────────────
+    if(j.bookings){
+      const SRC=docPart||combined;
+      const MONTHS=["","January","February","March","April","May","June","July","August","September","October","November","December"];
+      const dr=/(\\d{1,2})[\/\\-](\\d{1,2})[\/\\-](\\d{2,4})/g;
+      const dates=[]; let m;
+      while((m=dr.exec(SRC))!==null){
+        const d2=parseInt(m[1]),mo=parseInt(m[2]),yr=parseInt(m[3])<100?2000+parseInt(m[3]):parseInt(m[3]);
+        if(mo>=1&&mo<=12&&d2>=1&&d2<=31) dates.push({raw:m[0],r:d2+" "+MONTHS[mo]+" "+yr});
+      }
+      const uniq=dates.filter((v,i,a)=>a.findIndex(x=>x.raw===v.raw)===i);
+      j.bookings=j.bookings.map(function(b,i){
+        if(!b.date||b.date.toLowerCase().includes("tbc")||!b.date.trim()){
+          if(uniq[i]) b.date=uniq[i].r; else if(uniq[0]) b.date=uniq[0].r;
+        }
+        if(!b.session_start||b.session_start.toLowerCase().includes("tbc")||!b.session_start.trim()){
+          const st=(b.session_type||"").toLowerCase();
+          b.session_start=st.includes("recurrent")?"09:00":st.includes("initial")?"08:30":"09:00";
+          b.session_end=st.includes("recurrent")?"14:00":st.includes("initial")?"16:30":"13:00";
+        }
+        return b;
+      });
+    }
+    renderProcessResults(j,combined);
+    logProcessedEmail(j,combined);
+    hint.textContent="Done — review the emails below and click Open in Outlook to send";
+  }catch(e){
+    document.getElementById("proc-results").innerHTML='<div class="proc-flag"><strong>Error: </strong>'+e.message.replace(/</g,"&lt;")+'</div>';
+    hint.textContent="Error — see above";
+  }
+  btn.disabled=false; btn.textContent="Process with Jasmine";
+}
+
+
+
+
+function clearProcess(){
+  document.getElementById("proc-input").value="";
+  const dz=document.getElementById("drop-zone");
+  if(dz){dz.classList.remove("loaded");document.getElementById("dz-label").textContent="Drag and drop an email file here, or click to browse";}
+  const ef=document.getElementById("email-file");
+  if(ef) ef.value="";
+  attachedImageB64=null; attachedImageType=null;
+  window._attachedDocText="";
+  const dz2=document.getElementById("doc-drop-zone"); if(dz2){dz2.classList.remove("loaded");} const dl=document.getElementById("doc-dz-label"); if(dl) dl.textContent="Drag the booking form here — Word (.docx) or Excel (.xlsx)"; const df=document.getElementById("doc-file"); if(df) df.value="";
+  const iz=document.getElementById("img-attach-zone");
+  if(iz){iz.classList.remove("loaded");document.getElementById("iaz-label").textContent="Attach image containing booking details";}
+  const prev=document.getElementById("iaz-preview");
+  if(prev){prev.src="";prev.classList.remove("show");}
+  const imgf=document.getElementById("img-file");
+  if(imgf) imgf.value="";
+  document.getElementById("proc-results").innerHTML='<div class="proc-empty"><div style="font-size:36px;">📨</div><div>Paste or attach the next email above and click <strong>Process with Jasmine</strong></div><div style="font-size:12px;">Jasmine will generate the client reply and trainer confirmation — each with an Open in Outlook button</div></div>';
+  document.getElementById("proc-hint").textContent="Ready for the next email — paste, attach, or drag a file above";
+  document.getElementById("proc-btn").disabled=false;
+  document.getElementById("proc-btn").textContent="Process with Jasmine";
+}
+
+function mailto(to,subject,body){
+  const arr=Array.isArray(to)?to:[to];
+  const toStr=arr.filter(Boolean).join(",");
+  return "mailto:"+encodeURIComponent(toStr)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);
+}
+
+function buildFieldsTable(fields){
+  if(!fields) return "";
+  var rows = Object.entries(fields).map(function(e){
+    return '<tr style="border-bottom:1px solid #dcfce7;"><td style="padding:5px 10px;font-weight:600;color:#166534;background:#f0fdf4;width:180px;font-family:monospace;font-size:11px;">{{'+e[0]+'}}</td><td style="padding:5px 10px;color:#1c4a2a;font-size:12px;">'+esc(String(e[1]))+'</td></tr>';
+  }).join('');
+  return '<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.05em;margin-bottom:8px;">WORD DOC PLACEHOLDERS — auto-filled by Power Automate when connected</div><table style="width:100%;border-collapse:collapse;">'+rows+'</table></div>';
+}
+
+function renderProcessResults(j, rawEmail){
+  const el=document.getElementById("proc-results");
+
+  // Handle both old single-booking and new multi-booking response formats
+  const bks = j.bookings || (j.action_type ? [j] : []);
+
+  if(!bks.length || bks.every(b=>b.action_type==="unknown")){
+    el.innerHTML=`<div class="proc-flag"><strong>⚠ Jasmine could not identify any known booking requests.</strong><br><br>${j.diane_summary||"The email domain was not recognised or the request was too unclear to process. Review manually."}</div>`;
+    return;
+  }
+
+  let html="";
+
+  // ── Diane summary ──
+  if(j.diane_summary){
+    html+=`<div class="proc-summary">
+      <div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.06em;margin-bottom:6px;">JASMINE SUMMARY</div>
+      <div style="font-size:13px;color:#374151;line-height:1.7;">${j.diane_summary}</div>
+    </div>`;
+  }
+
+  // ── Per-booking cards ──
+  html+=`<div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.06em;margin-bottom:2px;">${bks.length} SESSION${bks.length>1?"S":""} FOUND</div>`;
+
+  bks.forEach((b,i)=>{
+    const rulesHtml=(b.rules_applied||[]).map(r=>`<span class="rules-badge">${r}</span>`).join(" ");
+    const flagsHtml=(b.flags||[]).length?`<div style="font-size:11px;color:#854d0e;margin-top:8px;padding:6px 10px;background:#fef9c3;border-radius:6px;">${b.flags.join("<br>")}</div>`:"";
+    const isDeeca=b.action_type==="deeca_quote";
+
+    html+=`<div style="background:white;border:1px solid ${isDeeca?"#86efac":"#e2e8f0"};border-radius:12px;padding:16px 18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="width:24px;height:24px;border-radius:6px;background:${isDeeca?"#15803d":"#0f172a"};color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">${i+1}</div>
+        <div style="font-size:13px;font-weight:600;color:#0f172a;">${b.session_type||"—"} — ${b.state||"—"}</div>
+        ${isDeeca?`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#dcfce7;color:#15803d;">QUOTE REQUIRED</span>`:""}
+        ${b.full_day?`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#dcfce7;color:#15803d;">FULL DAY</span>`:""}
+      </div>
+      <div class="proc-summary-grid" style="margin-bottom:10px;">
+        <div class="proc-summary-item"><div class="psi-lbl">DATE</div><div class="psi-val">${b.date||"TBC"}</div></div>
+        <div class="proc-summary-item"><div class="psi-lbl">TIME</div><div class="psi-val">${b.full_day?"Full Day":(b.session_start&&b.session_end?b.session_start+"–"+b.session_end:"TBC")}</div></div>
+        <div class="proc-summary-item"><div class="psi-lbl">TRAINERS</div><div class="psi-val">${(b.trainers||[]).join(", ")||"TBC"}</div></div>
+        <div class="proc-summary-item"><div class="psi-lbl">PARTICIPANTS</div><div class="psi-val">${b.participants||"TBC"}</div></div>
+        <div class="proc-summary-item"><div class="psi-lbl">VENUE</div><div class="psi-val">${b.venue||"TBC"}</div></div>
+        <div class="proc-summary-item"><div class="psi-lbl">CLIENT</div><div class="psi-val">${b.client||"TBC"}</div></div>
+      </div>
+      ${rulesHtml?`<div style="margin-bottom:8px;">${rulesHtml}</div>`:""}
+      ${b.calendar_title?`<div style="font-size:11px;color:#1d4ed8;background:#eff6ff;padding:6px 10px;border-radius:6px;">📅 ${b.calendar_title}</div>`:""}
+      ${flagsHtml}
+    </div>`;
+
+    // Add to bookings tab automatically
+    if(b.action_type==="booking"||b.action_type==="deeca_quote"){
+      addToBookingsTab(b);
+    }
+  });
+
+  // ── Section 5 for DEECA (shown before email) ──
+  const sec5 = j.quote_section5 || j.quote_section4 || "";
+  const isDeecaBatch = bks.some(b=>b.action_type==="deeca_quote");
+  if(isDeecaBatch && sec5){
+    html+=`<div class="proc-deeca" style="margin-top:0;">
+      <div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.06em;margin-bottom:6px;">📋 SECTION 5 — REQUEST FOR SERVICE (COMPLETED)</div><div style="font-size:11px;color:#15803d;margin-bottom:10px;">Copy this into the original DEECA Word document and attach to the email before sending.</div>
+      <div style="font-size:12px;color:#14532d;white-space:pre-wrap;line-height:1.9;font-family:'Courier New',monospace;background:#f0fdf4;padding:14px 16px;border-radius:8px;border:1px solid #86efac;">${esc(sec5)}</div>
+      ${buildFieldsTable(j.quote_section5_fields)}
+      ${j.quote_total?`<div style="margin-top:12px;padding:10px 14px;background:#dcfce7;border-radius:8px;font-size:14px;font-weight:700;color:#15803d;">Total Quote: $${j.quote_total.toFixed(2)} inc GST</div>`:""}
+    </div>`;
+  }
+
+  // ── Combined client email ──
+  if(j.client_email_body){
+    // DEECA: client email contains tentative bookings only — Section 5 is separate (attached as Word doc)
+    const emailBody = j.client_email_body || "";
+    const emailTo = isDeecaBatch ? (j.client_email_to||"organisational_capability_team@deeca.vic.gov.au") : (j.client_email_to||"");
+    const emailSubj = isDeecaBatch ? (j.client_email_subject||"DEECA Training — Tentative Booking Confirmation") : (j.client_email_subject||"Training Confirmation");
+    const mlink=mailto(emailTo, emailSubj, emailBody);
+    html+=`<div class="email-card">
+      <div class="email-card-hdr">
+        <div>
+          <div class="email-card-title">${isDeecaBatch?"📧 DEECA Client Email — Quote + Section 5":"📧 Client Confirmation Email — All "+bks.length+" Session"+(bks.length>1?"s":"")}</div>
+          <div class="email-card-to">To: ${isDeecaBatch?"organisational_capability_team@deeca.vic.gov.au":(j.client_email_to||"(client email)")} · ${isDeecaBatch?"Pending Diane approval":"Subject: "+(j.client_email_subject||"")}</div>
+        </div>
+        <a class="open-btn${isDeecaBatch?" deeca":""}" href="${mlink}">Open in Outlook ↗</a>
+      </div>
+      <div class="email-card-body">${esc(emailBody)}</div>
+    </div>`;
+    if(isDeecaBatch){
+      html+=`<div class="proc-flag" style="line-height:1.8;">
+      <strong>⚠ Before sending — Diane must:</strong><br>
+      1. Open the original DEECA Word document (the Class Request Form)<br>
+      2. Copy the completed <strong>Section 5</strong> text from the green box above into the Word document<br>
+      3. Save the Word document<br>
+      4. Click <strong>Open in Outlook ↗</strong> above — the client email opens pre-filled with tentative booking details<br>
+      5. Attach the completed Word document to the email<br>
+      6. Review and send once approved<br><br>
+      <strong>Note:</strong> The client email contains tentative booking details only — no pricing. All pricing is in the Section 5 Word document attachment.<br>
+      <strong>Calendar:</strong> Dates are added as Tentative — Pending Quote Approval. They will be confirmed once DEECA approves the quote.
+    </div>`;
+    }
+  }
+
+  // ── Trainer emails (one per trainer or trainer group) ──
+  const trainerEmails = j.trainer_emails || (j.trainer_email_body ? [{trainer_names:j.trainers||[],trainer_email_to:Array.isArray(j.trainer_email_to)?j.trainer_email_to:[j.trainer_email_to],trainer_email_subject:j.trainer_email_subject,trainer_email_body:j.trainer_email_body}] : []);
+  trainerEmails.forEach((te,ti)=>{
+    if(!te.trainer_email_body) return;
+    const mlink=mailto(te.trainer_email_to||[],te.trainer_email_subject||"Training Booking",te.trainer_email_body);
+    html+=`<div class="email-card">
+      <div class="email-card-hdr">
+        <div>
+          <div class="email-card-title">👤 Trainer Confirmation${trainerEmails.length>1?" ("+(ti+1)+"/"+trainerEmails.length+")":""}: ${(te.trainer_names||[]).join(", ")||"Trainer"}</div>
+          <div class="email-card-to">To: ${(te.trainer_email_to||[]).join(", ")||"(trainer email)"}</div>
+        </div>
+        <a class="open-btn trainer" href="${mlink}">Open in Outlook ↗</a>
+      </div>
+      <div class="email-card-body">${te.trainer_email_body}</div>
+    </div>`;
+  });
+
+  // ── Overall flags ──
+  if((j.overall_flags||[]).length){
+    html+=`<div class="proc-flag"><strong>⚠ Flags:</strong><br>${j.overall_flags.join("<br>")}</div>`;
+  }
+
+  el.innerHTML=html;
+}
+
+// ── Add processed booking to the Bookings tab ──────────────────────────────
+function addToBookingsTab(b){
+  const newBk={
+    id: Date.now()+Math.floor(Math.random()*9999),
+    client: b.client||"Unknown",
+    session: b.session_type||"Unknown session",
+    date: b.date||"TBC",
+    state: b.state||"TBC",
+    venue: b.venue||"",
+    participants: b.participants||"",
+    trainers: b.trainers&&b.trainers.length?b.trainers:["TBC"],
+    session_start: b.session_start||"09:00",
+    session_end: b.session_end||"",
+    status: b.action_type==="deeca_quote"?"Tentative — Pending Quote Approval":"Confirmed",
+    fd: b.full_day||false
+  };
+  bookings.unshift(newBk);
+  renderBookings();
+}
+
+
+// ─── BOOKING DETAIL + CALENDAR ────────────────────────────────────────────────
+
+function openBkDetail(id){
+  const b = bookings.find(x=>x.id===id);
+  if(!b) return;
+  const clientColors = {"Virgin Australia":["#fef2f2","#b91c1c"],"V/Line":["#eff6ff","#1d4ed8"],"DEECA":["#f0fdf4","#15803d"],"Wayss":["#f5f3ff","#7c3aed"],"Scentregroup":["#fff7ed","#c2410c"]};
+  const [cbg,cfg] = clientColors[b.client] || ["#f1f5f9","#475569"];
+  const ss = b.status==="Confirmed"?"background:#dcfce7;color:#15803d;":b.status==="Quote Pending"?"background:#fef9c3;color:#854d0e;":"background:#f1f5f9;color:#475569;";
+
+  // Build Outlook Web calendar URL
+  const calUrl = buildCalendarUrl(b);
+
+  document.getElementById("bk-detail-content").innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+      <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;background:${cbg};color:${cfg};">${esc(b.client)}</span>
+      <span class="sp" style="${ss}">${b.status}</span>
+      ${b.fd?'<span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:10px;background:#dcfce7;color:#15803d;">FULL DAY</span>':''}
+    </div>
+    <div class="bk-detail-title">${esc(b.session)}</div>
+    <div class="bk-detail-sub">Booking ID: ${b.id}</div>
+    <div class="bk-detail-grid">
+      <div class="bk-detail-field"><div class="bk-detail-lbl">DATE</div><div class="bk-detail-val">${b.date||"TBC"}</div></div>
+      <div class="bk-detail-field"><div class="bk-detail-lbl">STATE / LOCATION</div><div class="bk-detail-val">${b.state||"TBC"}</div></div>
+      <div class="bk-detail-field"><div class="bk-detail-lbl">TIME</div><div class="bk-detail-val">${b.fd?"Full Day":(b.session_start&&b.session_end?b.session_start+"–"+b.session_end:"See session defaults")}</div></div>
+      <div class="bk-detail-field"><div class="bk-detail-lbl">PARTICIPANTS</div><div class="bk-detail-val">${b.participants||"TBC"}</div></div>
+      <div class="bk-detail-field" style="grid-column:1/-1"><div class="bk-detail-lbl">TRAINER(S)</div><div class="bk-detail-val">${(b.trainers||[]).join(", ")||"TBC"}</div></div>
+      <div class="bk-detail-field" style="grid-column:1/-1"><div class="bk-detail-lbl">VENUE</div><div class="bk-detail-val">${getLocationDisplay(b.state)}</div></div>
+      <div class="bk-detail-field" style="grid-column:1/-1" id="loc-instructions-field"><div class="bk-detail-lbl">TRAINER INSTRUCTIONS</div><div class="bk-detail-val" style="font-size:12px;line-height:1.7;white-space:pre-wrap;">${getLocationInstructions(b.state)}</div></div>
+    </div>
+    <div class="bk-detail-actions">
+      <a class="cal-btn" href="${calUrl}" target="_blank">📅 Add to Outlook Calendar</a>
+      
+    </div>`;
+  document.getElementById("bk-detail-overlay").classList.add("open");
+}
+
+function closeBkDetail(){
+  document.getElementById("bk-detail-overlay").classList.remove("open");
+}
+
+
+function getLocationDisplay(state){
+  const LOCATIONS={"MEL":"MEL Training Centre\nGate 26 South Centre Rd, Tullamarine VIC 3043\nPhone: 03 8346 3242","SYD":"Sydney Training Centre\n2/476 Gardeners Road, Alexandria NSW 2015\nPhone: 02 9352 7649","BNE":"Virgin Australia/Ansett Aviation Training\n3 Melia St, Eagle Farm QLD 4009\nPhone: 07 3860 0500","PER":"Jandakot Training Facility, Jandakot Airport Perth WA\nPhone: TBC — confirm with VA ops","ADL":"Adelaide Training (SA) — Address TBC"};
+  return LOCATIONS[(state||"").toUpperCase()] || state || "TBC";
+}
+function getLocationInstructions(state){
+  const INS={
+    "MEL":"On arrival, use intercom and press the number for crew training centre — linked to Christine Battershill who will open the gate remotely. Walk to front of building (VA building on left at end of driveway). Contact Christine on 03 8346 3242 for front door access.\nParking: Free on site. Printing/scanning: Admin office. WIFI: Guest log in (arrange via VA admin office).",
+    "SYD":"Front door on O'Riordan Street. Parking: Obtain car park swipe from Training Centre Office, park in underground carpark and return swipe to office.\nPrinting/scanning: Training Centre Office. WIFI: Guest log in (arrange via local trainer).",
+    "BNE":"On arrival, check in at reception as a guest for building access.\nParking: Free on site. Printing/scanning: Admin office. WIFI: Guest log in (arrange via VA admin office).",
+    "PER":"TBC — confirm access details with VA ops prior to session.",
+    "ADL":"TBC — confirm access details with VA ops prior to session."
+  };
+  return INS[(state||"").toUpperCase()] || "No specific instructions on file for this location.";
+}
+
+function buildCalendarUrl(b){
+  // Build Outlook Web "new event" deep link
+  // Format: https://outlook.office.com/calendar/action/compose?...
+  const title = encodeURIComponent((b.client||"") + " — " + (b.session||"") + " — " + (b.state||""));
+  const trainers = (b.trainers||[]).join(", ") || "TBC";
+  const participants = b.participants || "TBC";
+  const venue = b.venue || b.state || "";
+  // Location details lookup
+  const LOCATIONS = {
+    "MEL": {
+      name: "MEL Training Centre",
+      address: "Gate 26 South Centre Rd, Tullamarine VIC 3043",
+      phone: "03 8346 3242",
+      instructions: "On arrival, use intercom and press the number listed for \"crew training centre\" — linked to admin coordinator Christine Battershill who will open the gate remotely. Once entered and parked, walk to the front of the building (VA building is on the left at the end of the driveway). Contact Christine on 03 8346 3242 to be provided access through the front door.\nParking: Free parking available on site.\nPrinting/scanning: Within admin office.\nWIFI: Guest log in available (arrange via VA admin office)."
+    },
+    "SYD": {
+      name: "Sydney Training Centre",
+      address: "2/476 Gardeners Road, Alexandria NSW 2015",
+      phone: "02 9352 7649",
+      instructions: "Front door located on O'Riordan Street.\nParking: Available for Instructors — obtain car park swipe from Training Centre Office, park in underground carpark and return swipe to office.\nPrinting/scanning: Within the Training Centre Office.\nWIFI: Guest log in available (arrange via local trainer)."
+    },
+    "BNE": {
+      name: "Virgin Australia/Ansett Aviation Training",
+      address: "3 Melia St, Eagle Farm QLD 4009",
+      phone: "07 3860 0500",
+      instructions: "On arrival, check in at reception as a guest to be provided access into the building.\nParking: Free parking available on site.\nPrinting/scanning: Within admin office.\nWIFI: Guest log in available (arrange via VA admin office)."
+    },
+    "PER": {
+      name: "Jandakot Training Facility",
+      address: "Jandakot Airport, Perth WA",
+      phone: "TBC — confirm with VA ops",
+      instructions: "TBC — confirm venue access details with VA ops prior to session."
+    },
+    "ADL": {
+      name: "Adelaide Training (SA)",
+      address: "TBC — confirm with VA ops",
+      phone: "TBC",
+      instructions: "TBC — confirm venue access details with VA ops prior to session."
+    }
+  };
+
+  // Match state/location code to location details
+  const stateCode = (b.state||"").toUpperCase().trim();
+  const loc = LOCATIONS[stateCode] || null;
+  const locName = loc ? loc.name : (venue||b.state||"");
+  const locAddress = loc ? loc.address : (venue||"");
+  const locPhone = loc ? loc.phone : "";
+  const locInstructions = loc ? loc.instructions : "";
+
+  const body = encodeURIComponent(
+    "CLIENT: " + (b.client||"") + "\n" +
+    "SESSION: " + (b.session||"") + "\n" +
+    "TRAINERS: " + trainers + "\n" +
+    "PARTICIPANTS: " + participants + "\n" +
+    "\n— VENUE —\n" +
+    locName + "\n" +
+    locAddress + "\n" +
+    (locPhone ? "Phone: " + locPhone + "\n" : "") +
+    "\n— TRAINER INSTRUCTIONS —\n" +
+    locInstructions + "\n" +
+    "\nStatus: " + (b.status||"") + "\n" +
+    "Booked by Jasmine — Risk 2 Solution Group"
+  );
+
+  // Parse date for start/end times
+  let startDT = "", endDT = "";
+  if(b.date && b.date !== "TBC"){
+    // Try to parse the date — handle formats like "2026-05-15", "Tuesday 24 March", "24 March"
+    let dateStr = b.date;
+    // Remove day names
+    dateStr = dateStr.replace(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+/i,"");
+    const parsed = new Date(dateStr + (dateStr.match(/\d{4}/)?"":", 2026"));
+    if(!isNaN(parsed)){
+      const y = parsed.getFullYear();
+      const mo = String(parsed.getMonth()+1).padStart(2,"0");
+      const d = String(parsed.getDate()).padStart(2,"0");
+      if(b.fd){
+        startDT = y+"-"+mo+"-"+d;
+        endDT = y+"-"+mo+"-"+d;
+      } else {
+        const startH = (b.session_start||"09:00").replace(":","");
+        const endH = (b.session_end||"14:00").replace(":","");
+        startDT = y+"-"+mo+"-"+d+"T"+startH.slice(0,2)+":"+startH.slice(2)+":00";
+        endDT = y+"-"+mo+"-"+d+"T"+endH.slice(0,2)+":"+endH.slice(2)+":00";
+      }
+    }
+  }
+
+  let url = "https://outlook.office365.com/calendar/action/compose?subject=" + title + "&body=" + body;
+  if(startDT) url += "&startdt=" + encodeURIComponent(startDT);
+  if(endDT)   url += "&enddt=" + encodeURIComponent(endDT);
+  if(locAddress) url += "&location=" + encodeURIComponent(locName + ", " + locAddress);
+  if(b.fd)    url += "&allday=true";
+  return url;
+}
+
+
+// ─── ADD MODAL FUNCTIONS ───────────────────────────────────────────────────────
+
+function openModal(type){
+  document.getElementById('modal-'+type).classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeModal(type){
+  document.getElementById('modal-'+type).classList.remove('open');
+  document.body.style.overflow='';
+}
+
+function getChecked(cls){
+  return Array.from(document.querySelectorAll('.'+cls+':checked')).map(el=>el.value);
+}
+
+function saveTrainer(){
+  const name=document.getElementById('tr-name').value.trim();
+  if(!name){alert('Please enter the trainer name.');return;}
+  const email=document.getElementById('tr-email').value.trim();
+  const phone=document.getElementById('tr-phone').value.trim();
+  const status=document.getElementById('tr-status').value;
+  const states=getChecked('tr-state-cb');
+  const clients=getChecked('tr-client-cb');
+  const scope=document.getElementById('tr-scope').value.trim();
+  const notes=document.getElementById('tr-notes').value.trim();
+
+  const newT={
+    id: TRAINERS.length+1,
+    name,
+    email: email||'TBC',
+    phone: phone||'',
+    temp: status==='temp',
+    scope: scope||(clients.join(', ')+' — '+states.join(', ')),
+    notes
+  };
+  TRAINERS.push(newT);
+  renderTr();
+  closeModal('trainer');
+  // Clear fields
+  ['tr-name','tr-email','tr-phone','tr-scope','tr-notes'].forEach(id=>document.getElementById(id).value='');
+  document.querySelectorAll('.tr-state-cb,.tr-client-cb').forEach(cb=>cb.checked=false);
+  document.getElementById('tr-status').value='confirmed';
+  alert('✓ '+name+' added successfully. Jasmine will now include them in trainer assignments.');
+}
+
+function saveSession(){
+  const name=document.getElementById('se-name').value.trim();
+  if(!name){alert('Please enter the session name.');return;}
+  const start=document.getElementById('se-start').value.trim()||'TBC';
+  const end=document.getElementById('se-end').value.trim()||'TBC';
+  const dur=document.getElementById('se-dur').value.trim()||'TBC';
+  const trainers=document.getElementById('se-trainers').value;
+  const clients=getChecked('se-client-cb');
+  const fullDay=document.getElementById('se-fullday').checked;
+  const quote=document.getElementById('se-quote').checked;
+  const rules=document.getElementById('se-rules').value.trim();
+  const notes=document.getElementById('se-notes').value.trim();
+
+  const newS={
+    id: SESSIONS.length+1,
+    name,
+    start,
+    end,
+    dur,
+    trainers,
+    clients: clients.join(', ')||'All clients',
+    fd: fullDay,
+    requiresQuote: quote,
+    rules,
+    notes
+  };
+  SESSIONS.push(newS);
+  renderSess();
+  document.getElementById('se-count').textContent=SESSIONS.length+' session types';
+  closeModal('session');
+  ['se-name','se-start','se-end','se-dur','se-rules','se-notes'].forEach(id=>document.getElementById(id).value='');
+  document.querySelectorAll('.se-client-cb').forEach(cb=>cb.checked=false);
+  document.getElementById('se-fullday').checked=false;
+  document.getElementById('se-quote').checked=false;
+  document.getElementById('se-trainers').value='1';
+  alert('✓ Session type "'+name+'" added. Jasmine will now recognise and process this session type.');
+}
+
+function saveClient(){
+  const name=document.getElementById('cl-name').value.trim();
+  if(!name){alert('Please enter the client name.');return;}
+  const short=document.getElementById('cl-short').value.trim().toUpperCase()||name.slice(0,2).toUpperCase();
+  const domain=document.getElementById('cl-domain').value.trim();
+  const state=document.getElementById('cl-state').value;
+  const color=document.getElementById('cl-color').value.trim()||'#374151';
+  const workflow=document.getElementById('cl-workflow').value;
+  const trainerPrefs=document.getElementById('cl-trainers').value.trim();
+  const rules=document.getElementById('cl-rules').value.trim();
+  const notes=document.getElementById('cl-notes').value.trim();
+
+  const workflowLabel = workflow==='quote'?'Quote workflow required before booking':workflow==='manual'?'Manual only — flag to Diane':rules;
+
+  const newC={
+    id: name.toLowerCase().replace(/\s+/g,'-').slice(0,4),
+    name, short, domain, color,
+    bg: color+'22',
+    state,
+    notes: (workflowLabel+(trainerPrefs?'\nTrainer preference: '+trainerPrefs:'')+(notes?'\n'+notes:''))
+  };
+  CLIENTS.push(newC);
+  renderClients();
+  document.getElementById('cl-count').textContent=CLIENTS.length+' clients';
+  closeModal('client');
+  ['cl-name','cl-short','cl-domain','cl-color','cl-trainers','cl-rules','cl-notes'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('cl-state').value='VIC';
+  document.getElementById('cl-workflow').value='standard';
+  alert('✓ '+name+' added. Jasmine will now recognise emails from '+domain+' and apply their rules automatically.');
+}
+
+// ── Update SYS prompts dynamically when new items are added ──────────────────
+// After adding a client/trainer/session, update the in-memory prompts so Jasmine
+// knows about them immediately in the Chat tab
+function rebuildSysContext(){
+  // This hooks into the live TRAINERS, CLIENTS, SESSIONS arrays
+  // The Chat SYS prompt is static text — for full dynamic updates
+  // the user should reload after significant changes
+  // For now: alert the user that Chat will reflect changes on next session
+}
+
+
+// ─── SERVER INTEGRATION ────────────────────────────────────────────────────────
+
+const SERVER_MODE = false; // Set to true when running with server.js
+// When hosted on Azure, the HTML talks to the Express server via /api/* routes
+// In standalone mode, everything runs client-side as before
+
+async function apiCall(method, path, body) {
+  if (!SERVER_MODE) return null;
+  try {
+    const opts = { method, headers: { "Content-Type": "application/json" } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    return await res.json();
+  } catch(e) { console.error("API error:", e); return null; }
+}
+
+async function doLogin() {
+  const pw = document.getElementById("login-pw").value;
+  if (SERVER_MODE) {
+    const res = await apiCall("POST", "/api/login", { password: pw });
+    if (res && res.success) {
+      document.getElementById("login-overlay").style.display = "none";
+      initAfterLogin();
+    } else {
+      document.getElementById("login-error").style.display = "block";
+    }
+  } else {
+    // Standalone mode — just hide the overlay (no auth needed)
+    document.getElementById("login-overlay").style.display = "none";
+  }
+}
+
+function initAfterLogin() {
+  loadQueueFromServer();
+  checkM365Status();
+  startQueuePolling();
+}
+
+// ─── REVIEW QUEUE ──────────────────────────────────────────────────────────────
+
+let queueData = [];
+
+async function loadQueueFromServer() {
+  if (!SERVER_MODE) {
+    renderQueueFromMemory();
+    return;
+  }
+  const data = await apiCall("GET", "/api/review-queue");
+  if (data) {
+    queueData = data;
+    renderQueue(data);
+    updateQueueBadge(data.length);
+    document.getElementById("queue-count-label").textContent = data.length + " item" + (data.length !== 1 ? "s" : "") + " pending review";
+  }
+}
+
+function renderQueueFromMemory() {
+  // In standalone mode, queue items come from processEmail tab
+  const count = queueData.length;
+  document.getElementById("queue-count-label").textContent = count + " item" + (count !== 1 ? "s" : "") + " pending review";
+  renderQueue(queueData);
+  updateQueueBadge(count);
+}
+
+function updateQueueBadge(count) {
+  const badge = document.getElementById("queue-badge");
+  if (!badge) return;
+  if (count > 0) { badge.textContent = count; badge.style.display = "inline"; }
+  else { badge.style.display = "none"; }
+}
+
+function renderQueue(items) {
+  const el = document.getElementById("queue-list");
+  if (!el) return;
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="proc-empty"><div style="font-size:40px;margin-bottom:12px;">✅</div><div>No items pending review</div><div style="font-size:12px;color:#94a3b8;margin-top:6px;">Jasmine will process incoming emails automatically</div></div>';
+    return;
+  }
+  el.innerHTML = items.map(function(item) {
+    const client = item.client || "Unknown";
+    const clientColors = {"Virgin Australia":"#b91c1c","V/Line":"#1d4ed8","DEECA":"#15803d","Wayss":"#7c3aed","Scentregroup":"#d97706"};
+    const cc = clientColors[client] || "#475569";
+    const isDeeca = item.action_type === "deeca_quote";
+    const bks = item.bookings || [];
+    const mainBk = bks[0] || {};
+    return `<div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;margin-bottom:12px;cursor:pointer;transition:border-color .15s;" onclick="openQueueItem(${item.id})" onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#e2e8f0'">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span style="background:${cc}22;color:${cc};font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;">${client}</span>
+        ${isDeeca?'<span style="background:#f0fdf4;color:#15803d;font-size:11px;font-weight:600;padding:3px 10px;border-radius:10px;">QUOTE</span>':""}
+        <span style="margin-left:auto;font-size:11px;color:#94a3b8;">${new Date(item.timestamp).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">${esc(item.subject||"")}</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">${esc(item.diane_summary||"").slice(0,120)}${(item.diane_summary||"").length>120?"…":""}</div>
+      ${bks.length>0?`<div style="display:flex;flex-wrap:wrap;gap:6px;">${bks.map(function(b){return`<span style="font-size:11px;background:#f1f5f9;padding:2px 8px;border-radius:6px;color:#374151;">${esc(b.session_type||"")} · ${esc(b.date||"TBC")} · ${esc(b.state||"")}</span>`;}).join("")}</div>`:""}
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <span style="font-size:11px;color:#64748b;">${item.drafts&&item.drafts.length?`📧 ${item.drafts.length} draft${item.drafts.length>1?"s":""} ready in Outlook`:"No drafts yet"}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function openQueueItem(id) {
+  const item = queueData.find(function(i){ return i.id===id; });
+  if (!item) return;
+  const bks = item.bookings || [];
+  const isDeeca = item.action_type === "deeca_quote";
+
+  document.getElementById("bk-detail-content").innerHTML = `
+    <div class="bk-detail-title">${esc(item.subject||"")}</div>
+    <div class="bk-detail-sub">From: ${esc(item.from_email||"")} · ${new Date(item.timestamp).toLocaleString("en-AU")}</div>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#14532d;line-height:1.7;">${esc(item.diane_summary||"")}</div>
+    ${item.overall_flags&&item.overall_flags.length?`<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#713f12;">⚠ ${item.overall_flags.join(" · ")}</div>`:""}
+    <div class="bk-detail-grid">
+      ${bks.map(function(b){ return `
+        <div class="bk-detail-field"><div class="bk-detail-lbl">SESSION</div><div class="bk-detail-val">${esc(b.session_type||"")}</div></div>
+        <div class="bk-detail-field"><div class="bk-detail-lbl">DATE</div><div class="bk-detail-val">${esc(b.date||"TBC")}</div></div>
+        <div class="bk-detail-field"><div class="bk-detail-lbl">START</div><div class="bk-detail-val">${esc(b.session_start||"")}</div></div>
+        <div class="bk-detail-field"><div class="bk-detail-lbl">STATE</div><div class="bk-detail-val">${esc(b.state||"")}</div></div>
+        <div class="bk-detail-field"><div class="bk-detail-lbl">TRAINERS</div><div class="bk-detail-val">${esc((b.trainers||[]).join(", "))}</div></div>
+        <div class="bk-detail-field"><div class="bk-detail-lbl">VENUE</div><div class="bk-detail-val">${esc(b.venue||"")}</div></div>
+      `;}).join("")}
+    </div>
+    ${item.client_email_body?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;letter-spacing:.05em;margin-bottom:6px;">DRAFT CLIENT EMAIL</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;font-size:12px;color:#374151;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.7;">${esc(item.client_email_body)}</div></div>`:""}
+    ${isDeeca&&item.quote_section5?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.05em;margin-bottom:6px;">SECTION 5 — COMPLETED QUOTE</div><div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:12px;color:#14532d;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.8;">${esc(item.quote_section5)}</div></div>`:""}
+    ${item.drafts&&item.drafts.length?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;">OUTLOOK DRAFTS READY</div>${item.drafts.map(function(d){return`<div style="font-size:12px;color:#15803d;padding:4px 0;">✓ ${esc(d.description||d.type)} → ${esc(d.to||"")}</div>`;}).join("")}</div>`:""}
+    <div class="bk-detail-actions">
+      <button class="cal-btn green" onclick="approveItem(${item.id})">✓ Approve — Create Calendar & Confirm Drafts</button>
+      <button class="cal-btn" style="background:#dc2626;" onclick="rejectItem(${item.id})">✕ Reject</button>
+    </div>
+  `;
+  document.getElementById("bk-detail-overlay").classList.add("open");
+}
+
+async function approveItem(id) {
+  const item = queueData.find(function(i){ return i.id===id; });
+  if (!item) return;
+  if (SERVER_MODE) {
+    const res = await apiCall("POST", "/api/review-queue/" + id + "/approve");
+    if (res && res.success) {
+      item.status = "approved";
+      closeBkDetail();
+      queueData = queueData.filter(function(i){ return i.id!==id; });
+      renderQueue(queueData);
+      updateQueueBadge(queueData.length);
+      alert("✓ Approved! Calendar event created. Check Outlook drafts to review and send the confirmation emails.");
+    } else {
+      alert("Error approving: " + (res&&res.error ? res.error : "Unknown error"));
+    }
+  } else {
+    // Standalone mode — just mark as approved
+    item.status = "approved";
+    queueData = queueData.filter(function(i){ return i.id!==id; });
+    closeBkDetail();
+    renderQueue(queueData);
+    updateQueueBadge(queueData.length);
+    alert("✓ Approved in standalone mode.\n\nWhen connected to Azure: calendar event will be created automatically and drafts will appear in Outlook.");
+  }
+}
+
+function rejectItem(id) {
+  if (!confirm("Reject this booking? No emails will be sent.")) return;
+  if (SERVER_MODE) {
+    apiCall("POST", "/api/review-queue/" + id + "/reject", { reason: "" });
+  }
+  queueData = queueData.filter(function(i){ return i.id!==id; });
+  closeBkDetail();
+  renderQueue(queueData);
+  updateQueueBadge(queueData.length);
+}
+
+async function pollNow() {
+  const btn = document.querySelector("[onclick='pollNow()']");
+  if (btn) { btn.disabled=true; btn.textContent="Checking inbox…"; }
+  if (SERVER_MODE) {
+    await apiCall("POST", "/api/poll-now");
+    await loadQueueFromServer();
+  } else {
+    document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#f59e0b;padding:8px 12px;background:#fffbeb;border-radius:8px;margin-bottom:8px;">⚠ Not connected to Azure — inbox polling requires server mode. Use the Process Email tab to process emails manually.</div>';
+  }
+  if (btn) { btn.disabled=false; btn.textContent="🔄 Check Inbox Now"; }
+}
+
+async function checkM365Status() {
+  if (!SERVER_MODE) {
+    document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#64748b;padding:8px 12px;background:#f8fafc;border-radius:8px;margin-bottom:8px;">ℹ Running in standalone mode — inbox polling disabled. Drop emails in the Process Email tab.</div>';
+    return;
+  }
+  const res = await apiCall("GET", "/api/m365-status");
+  if (res && res.connected) {
+    document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#15803d;padding:8px 12px;background:#f0fdf4;border-radius:8px;margin-bottom:8px;">✓ Connected — watching ' + res.mailbox + ' · polling every 10 minutes</div>';
+  } else {
+    document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#b91c1c;padding:8px 12px;background:#fef2f2;border-radius:8px;margin-bottom:8px;">⚠ Not connected to Microsoft 365 — ' + (res&&res.reason?res.reason:"Azure credentials not configured") + '</div>';
+  }
+}
+
+function startQueuePolling() {
+  if (SERVER_MODE) {
+    setInterval(loadQueueFromServer, 30000); // refresh queue every 30 seconds
+  }
+}
+
+// Hook into processEmail to also add to queue in standalone mode
+const _origRenderProcessResults = renderProcessResults;
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+
+(function init(){
+  addMsg("assistant","Hi Diane! I'm Jasmine, your scheduling agent for Risk 2 Solution Group.\n\nEverything is loaded and ready:\n• 5 clients (VA, V/Line, DEECA, Wayss, Scentregroup)\n• 16 trainers with all state preferences and trainer pairs\n• 9 session types with times and trainer rules\n• Virgin Australia trainer pairs by state with cascade order\n• DEECA quote workflow and full pricing structure\n\nHow can I help you today?");
+  if(!getKey()) setTimeout(()=>addMsg("assistant","⚙ No API key detected. Click 'API Settings' at the bottom of the sidebar to add your Anthropic API key and enable the Chat tab."),800);
+  renderEmailLog();renderBookings();renderClients();renderTr();renderSess();
+})();
+</script>
+
+<!-- BOOKING DETAIL MODAL -->
+<div class="bk-detail-overlay" id="bk-detail-overlay" onclick="if(event.target===this)closeBkDetail()">
+  <div class="bk-detail-panel" id="bk-detail-panel">
+    <button class="bk-detail-close" onclick="closeBkDetail()">✕</button>
+    <div id="bk-detail-content"></div>
+  </div>
+</div>
+
+
+<!-- ADD TRAINER MODAL -->
+<div class="add-modal-overlay" id="modal-trainer" onclick="if(event.target===this)closeModal('trainer')">
+  <div class="add-modal">
+    <button class="add-modal-close" onclick="closeModal('trainer')">✕</button>
+    <h2>Add New Trainer</h2>
+    <p>New trainer will be available for assignment immediately and Jasmine will learn their preferences.</p>
+    <div class="form-grid">
+      <div class="form-field"><label>FULL NAME</label><input id="tr-name" placeholder="e.g. Sarah Mitchell"/></div>
+      <div class="form-field"><label>EMAIL ADDRESS</label><input id="tr-email" placeholder="sarah@email.com" type="email"/></div>
+      <div class="form-field"><label>PHONE</label><input id="tr-phone" placeholder="+61 4XX XXX XXX"/></div>
+      <div class="form-field"><label>STATUS</label>
+        <select id="tr-status"><option value="confirmed">Confirmed (real email)</option><option value="temp">Temporary (using placeholder email)</option></select>
+      </div>
+      <div class="form-section-title">STATE COVERAGE</div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>STATES THIS TRAINER COVERS</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;" id="tr-states-wrap">
+          <label class="checkrow"><input type="checkbox" value="QLD" class="tr-state-cb"> QLD</label>
+          <label class="checkrow"><input type="checkbox" value="NSW" class="tr-state-cb"> NSW</label>
+          <label class="checkrow"><input type="checkbox" value="VIC" class="tr-state-cb"> VIC</label>
+          <label class="checkrow"><input type="checkbox" value="WA" class="tr-state-cb"> WA</label>
+          <label class="checkrow"><input type="checkbox" value="SA" class="tr-state-cb"> SA</label>
+          <label class="checkrow"><input type="checkbox" value="TAS" class="tr-state-cb"> TAS</label>
+          <label class="checkrow"><input type="checkbox" value="NT" class="tr-state-cb"> NT</label>
+          <label class="checkrow"><input type="checkbox" value="ACT" class="tr-state-cb"> ACT</label>
+          <label class="checkrow"><input type="checkbox" value="NZ" class="tr-state-cb"> NZ</label>
+        </div>
+      </div>
+      <div class="form-section-title">CLIENT & SESSION ASSIGNMENTS</div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>CLIENTS THIS TRAINER IS QUALIFIED FOR</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;" id="tr-clients-wrap">
+          <label class="checkrow"><input type="checkbox" value="Virgin Australia" class="tr-client-cb"> Virgin Australia</label>
+          <label class="checkrow"><input type="checkbox" value="V/Line" class="tr-client-cb"> V/Line</label>
+          <label class="checkrow"><input type="checkbox" value="DEECA" class="tr-client-cb"> DEECA</label>
+          <label class="checkrow"><input type="checkbox" value="Wayss" class="tr-client-cb"> Wayss</label>
+          <label class="checkrow"><input type="checkbox" value="Scentregroup" class="tr-client-cb"> Scentregroup</label>
+        </div>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>CASCADE PREFERENCE ORDER & NOTES</label>
+        <textarea id="tr-scope" placeholder="e.g. VA VIC 1st pair, DEECA VIC, Scentregroup VIC. Cascade: 1st preference for VIC sessions, 2nd preference for NSW if primary unavailable."></textarea>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>SPECIAL RULES OR NOTES FOR JASMINE</label>
+        <textarea id="tr-notes" placeholder="e.g. Available Monday–Thursday only. Not available school holidays. Pairs with Ross Mackenzie for VA VIC."></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-s" onclick="closeModal('trainer')">Cancel</button>
+      <button class="btn btn-r" onclick="saveTrainer()">Add Trainer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD SESSION MODAL -->
+<div class="add-modal-overlay" id="modal-session" onclick="if(event.target===this)closeModal('session')">
+  <div class="add-modal">
+    <button class="add-modal-close" onclick="closeModal('session')">✕</button>
+    <h2>Add New Session Type</h2>
+    <p>Jasmine will use these details when identifying, booking and quoting for this session type.</p>
+    <div class="form-grid">
+      <div class="form-field" style="grid-column:1/-1"><label>SESSION NAME</label><input id="se-name" placeholder="e.g. Emergency Response Training"/></div>
+      <div class="form-field"><label>START TIME</label><input id="se-start" placeholder="09:00"/></div>
+      <div class="form-field"><label>END TIME</label><input id="se-end" placeholder="13:00"/></div>
+      <div class="form-field"><label>DURATION</label><input id="se-dur" placeholder="4 hrs"/></div>
+      <div class="form-field"><label>TRAINER COUNT</label>
+        <select id="se-trainers"><option value="1">1 trainer</option><option value="2">2 trainers</option><option value="See rules">Depends on participant count</option></select>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>CLIENTS THIS SESSION APPLIES TO</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;">
+          <label class="checkrow"><input type="checkbox" value="Virgin Australia" class="se-client-cb"> Virgin Australia</label>
+          <label class="checkrow"><input type="checkbox" value="V/Line" class="se-client-cb"> V/Line</label>
+          <label class="checkrow"><input type="checkbox" value="DEECA" class="se-client-cb"> DEECA</label>
+          <label class="checkrow"><input type="checkbox" value="Wayss" class="se-client-cb"> Wayss</label>
+          <label class="checkrow"><input type="checkbox" value="Scentregroup" class="se-client-cb"> Scentregroup</label>
+        </div>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label><input type="checkbox" id="se-fullday" style="accent-color:#b91c1c;margin-right:6px;">Book as FULL DAY in calendar</label>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label><input type="checkbox" id="se-quote" style="accent-color:#b91c1c;margin-right:6px;">Requires quote workflow before booking</label>
+      </div>
+      <div class="form-section-title">BOOKING RULES & BEHAVIOUR</div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>BOOKING RULES FOR JASMINE</label>
+        <textarea id="se-rules" placeholder="e.g. Participants under 14 = 1 trainer only. Always book 1 trainer for SA regardless of count. Require venue confirmation before sending trainer details."></textarea>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>ADDITIONAL NOTES</label>
+        <textarea id="se-notes" placeholder="e.g. Session includes practical scenario components. Trainer must arrive 30 minutes early. Includes printed materials."></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-s" onclick="closeModal('session')">Cancel</button>
+      <button class="btn btn-r" onclick="saveSession()">Add Session Type</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD CLIENT MODAL -->
+<div class="add-modal-overlay" id="modal-client" onclick="if(event.target===this)closeModal('client')">
+  <div class="add-modal">
+    <button class="add-modal-close" onclick="closeModal('client')">✕</button>
+    <h2>Add New Client</h2>
+    <p>Jasmine will recognise this client by email domain and apply their rules automatically to every booking.</p>
+    <div class="form-grid">
+      <div class="form-field"><label>CLIENT NAME</label><input id="cl-name" placeholder="e.g. Metro Fire District"/></div>
+      <div class="form-field"><label>SHORT CODE</label><input id="cl-short" placeholder="e.g. MF" maxlength="3"/></div>
+      <div class="form-field" style="grid-column:1/-1"><label>EMAIL DOMAIN (Jasmine identifies this client by this domain)</label><input id="cl-domain" placeholder="@metrofire.com.au"/></div>
+      <div class="form-field"><label>PRIMARY STATE</label>
+        <select id="cl-state"><option value="VIC">VIC</option><option value="NSW">NSW</option><option value="QLD">QLD</option><option value="WA">WA</option><option value="SA">SA</option><option value="TAS">TAS</option><option value="NT">NT</option><option value="ACT">ACT</option><option value="Multi-state">Multi-state</option></select>
+      </div>
+      <div class="form-field"><label>ACCENT COLOUR (hex)</label><input id="cl-color" placeholder="#1d4ed8" maxlength="7"/></div>
+      <div class="form-section-title">BOOKING WORKFLOW</div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>HOW SHOULD JASMINE HANDLE BOOKINGS FOR THIS CLIENT?</label>
+        <select id="cl-workflow">
+          <option value="standard">Standard — read email, assign trainer, confirm booking, send emails for Diane approval</option>
+          <option value="quote">Quote required — calculate quote first, send to Diane for approval, then confirm with client</option>
+          <option value="manual">Manual only — flag to Diane, do not auto-process</option>
+        </select>
+      </div>
+      <div class="form-section-title">TRAINER PREFERENCES</div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>TRAINER PREFERENCE ORDER FOR THIS CLIENT</label>
+        <textarea id="cl-trainers" placeholder="e.g. 1st preference: Ross Mackenzie&#10;2nd preference: Grant McDonald&#10;3rd preference: Dirk McLean&#10;&#10;Or specify by state: QLD = Lawrence Phillips, NSW = Mark Edmonds"></textarea>
+      </div>
+      <div class="form-section-title">CLIENT RULES & NOTES</div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>BOOKING RULES (Jasmine applies these to every request from this client)</label>
+        <textarea id="cl-rules" placeholder="e.g. Always book 2 trainers for groups over 20. All sessions require venue confirmation 48hrs before. Invoices go to finance@client.com not the training coordinator."></textarea>
+      </div>
+      <div class="form-field" style="grid-column:1/-1">
+        <label>SPECIAL NOTES OR CONTEXT</label>
+        <textarea id="cl-notes" placeholder="e.g. Client prefers morning sessions. Contact person is usually the Operations Manager. Always CC the Safety team on confirmations."></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-s" onclick="closeModal('client')">Cancel</button>
+      <button class="btn btn-r" onclick="saveClient()">Add Client</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN OVERLAY -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:#0f172a;z-index:999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:16px;padding:40px;width:100%;max-width:380px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.5);">
+    <svg width="48" height="48" viewBox="0 0 36 36" fill="none" style="margin:0 auto 16px;" xmlns="http://www.w3.org/2000/svg">
+      <rect x="11" y="2" width="22" height="20" rx="3.5" fill="none" stroke="#7f1d1d" stroke-width="1.5"/>
+      <rect x="11" y="2" width="22" height="6.5" rx="3.5" fill="#7f1d1d"/>
+      <rect x="11" y="6" width="22" height="2.5" fill="#7f1d1d"/>
+      <rect x="6" y="7" width="22" height="20" rx="3.5" fill="#1a2744" stroke="#991b1b" stroke-width="1.5"/>
+      <rect x="6" y="7" width="22" height="6.5" rx="3.5" fill="#991b1b"/>
+      <rect x="6" y="11" width="22" height="2.5" fill="#991b1b"/>
+      <rect x="1" y="12" width="22" height="22" rx="3.5" fill="#0f172a" stroke="#b91c1c" stroke-width="1.5"/>
+      <rect x="1" y="12" width="22" height="6.5" rx="3.5" fill="#b91c1c"/>
+      <rect x="1" y="16" width="22" height="2.5" fill="#b91c1c"/>
+      <circle cx="12" cy="32" r="4" fill="#b91c1c"/>
+      <text x="12" y="33.8" font-family="system-ui" font-size="5" font-weight="700" fill="white" text-anchor="middle">12</text>
+    </svg>
+    <div style="font-size:24px;font-weight:700;color:#0f172a;margin-bottom:4px;">Jasmine</div>
+    <div style="font-size:13px;color:#64748b;margin-bottom:28px;">R2S Scheduling Agent</div>
+    <input type="password" id="login-pw" placeholder="Enter password" style="width:100%;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;outline:none;margin-bottom:12px;box-sizing:border-box;" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()" style="width:100%;padding:12px;background:#b91c1c;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">Sign In</button>
+    <div id="login-error" style="color:#b91c1c;font-size:12px;margin-top:10px;display:none;">Incorrect password</div>
+    <div style="margin-top:20px;font-size:11px;color:#94a3b8;">No server detected — running in standalone mode</div>
+  </div>
+</div>
+</body>
+</html>
