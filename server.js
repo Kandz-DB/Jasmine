@@ -1,4 +1,7 @@
 const express = require("express");
+const Docxtemplater = require("docxtemplater");
+const PizZip = require("pizzip");
+const mammoth = require("mammoth");
 const session = require("express-session");
 const Anthropic = require("@anthropic-ai/sdk");
 const path = require("path");
@@ -287,11 +290,52 @@ async function processInboundEmail(email, clientName, token) {
     ? email.body.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
     : email.bodyPreview || "";
 
+  // ── Fetch Word doc attachments (critical for DEECA) ────────────────────────
+  let attachmentText = "";
+  let originalDocxBuffer = null;
+  let originalDocxName = "";
+
+  if (email.hasAttachments) {
+    try {
+      const attachments = await graphRequest("GET",
+        "/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/attachments",
+        null, token);
+
+      if (attachments && attachments.value) {
+        for (const att of attachments.value) {
+          const name = (att.name || "").toLowerCase();
+          if (name.endsWith(".docx") || name.endsWith(".doc")) {
+            // Save the original binary for later document generation
+            if (att.contentBytes) {
+              originalDocxBuffer = Buffer.from(att.contentBytes, "base64");
+              originalDocxName = att.name || "attachment.docx";
+              // Extract text using mammoth
+              try {
+                const result = await mammoth.extractRawText({ buffer: originalDocxBuffer });
+                if (result.value) {
+                  attachmentText += "\n\n=== ATTACHED DOCUMENT: " + att.name + " ===\n" + result.value.trim();
+                  console.log("Read Word attachment: " + att.name + " (" + result.value.length + " chars)");
+                }
+              } catch (err) {
+                console.error("mammoth error:", err.message);
+              }
+            }
+          } else if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
+            attachmentText += "\n\n=== ATTACHED FILE: " + att.name + " (Excel/CSV) ===";
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Attachment fetch error:", err.message);
+    }
+  }
+
   const emailContent = [
     "From: " + (email.from && email.from.emailAddress ? email.from.emailAddress.address : ""),
     "Subject: " + (email.subject || ""),
     "Date received: " + (email.receivedDateTime || ""),
-    "Body: " + bodyText.slice(0, 8000)
+    "Body: " + bodyText.slice(0, 6000),
+    attachmentText.slice(0, 16000)
   ].join("\n");
 
   let jasmineParsed, extractedFacts;
@@ -338,6 +382,8 @@ async function processInboundEmail(email, clientName, token) {
     diane_summary: jasmineParsed.diane_summary || "",
     overall_flags: jasmineParsed.overall_flags || [],
     extracted_facts: extractedFacts,
+    original_docx: originalDocxBuffer,       // original client Word doc binary
+    original_docx_name: originalDocxName,    // original filename
     status: "pending",
     drafts: []
   };
@@ -621,6 +667,77 @@ app.get("/api/m365-status", requireAuth, async (req, res) => {
   }
 });
 
+// ── GENERATE SECTION 5 WORD DOCUMENT ─────────────────────────────────────────
+app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
+  const entry = reviewQueue.find(e => e.id === parseInt(req.params.id));
+  if (!entry) return res.status(404).json({ error: "Queue entry not found" });
+
+  const fields = entry.quote_section5_fields;
+  if (!fields || Object.keys(fields).length === 0) {
+    return res.status(400).json({ error: "No quote fields available for this entry. Make sure Jasmine processed a DEECA email with a booking form attached." });
+  }
+
+  // Prefer the original client document — fall back to template if not available
+  let docxContent;
+  let outputFilename;
+
+  if (entry.original_docx && entry.original_docx.length > 0) {
+    // Use the original client Word document
+    console.log("Using original client document: " + entry.original_docx_name);
+    docxContent = entry.original_docx.toString("binary");
+    outputFilename = (entry.original_docx_name || "DEECA_Request").replace(".docx", "") + "_Completed.docx";
+  } else {
+    // Fall back to standalone template
+    console.log("No original document found — using standalone template");
+    const templatePath = path.join(__dirname, "templates", "DEECA_Section5_Template.docx");
+    if (!fs.existsSync(templatePath)) {
+      return res.status(500).json({ error: "No original DEECA document was attached to the email, and the fallback template was not found on the server." });
+    }
+    docxContent = fs.readFileSync(templatePath, "binary");
+    outputFilename = "DEECA_Section5_Completed.docx";
+  }
+
+  try {
+    const zip = new PizZip(docxContent);
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: { start: "{{", end: "}}" }
+    });
+
+    // Map fields to template placeholders
+    const data = {
+      TRAINER_NAME: fields.TRAINER_NAME || "",
+      CLASS_DATES: fields.CLASS_DATES || "",
+      START_TIME: fields.START_TIME || "09:00",
+      FINISH_TIME: fields.FINISH_TIME || "13:00",
+      CLASS_COST_EX: fields.CLASS_COST_EX || "$0.00",
+      CLASS_COST_INC: fields.CLASS_COST_INC || "$0.00",
+      MATERIALS_EX: fields.MATERIALS_EX || "$0.00",
+      MATERIALS_INC: fields.MATERIALS_INC || "$0.00",
+      TRAVEL_KM: fields.TRAVEL_KM || "$0.00",
+      ACCOM_MEALS: fields.ACCOM_MEALS || "$0.00",
+      TOTAL_EX: fields.TOTAL_EX || "$0.00",
+      TOTAL_INC: fields.TOTAL_INC || "$0.00",
+      DATE_PREPARED: fields.DATE_PREPARED || new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })
+    };
+
+    doc.render(data);
+
+    const buf = doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" });
+
+    const filename = outputFilename;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", 'attachment; filename="' + filename + '"');
+    res.send(buf);
+    console.log("Section 5 generated for entry", entry.id);
+  } catch (err) {
+    console.error("Section 5 generation error:", err);
+    res.status(500).json({ error: "Could not generate document: " + err.message });
+  }
+});
+
 // ── START ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log("Jasmine is running on port " + PORT);
@@ -632,3 +749,4 @@ app.listen(PORT, () => {
     console.log("Azure not configured — email polling disabled. Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET to enable.");
   }
 });
+
