@@ -622,8 +622,7 @@ async function approveQueueEntry(entry) {
           {
             subject: entry.client_email_subject || "Training Booking Confirmation",
             toRecipients: [{ emailAddress: { address: entry.client_email_to } }],
-            body: { contentType: "HTML", content: "<p>" + (entry.client_email_body||"").replace(/
-/g,"<br>") + "</p>" },
+            body: { contentType: "HTML", content: "<p>" + (entry.client_email_body||"").split("\n").join("<br>") + "</p>" },
             isDraft: true
           }, token);
         if (clientDraft && clientDraft.id) {
@@ -649,8 +648,7 @@ async function approveQueueEntry(entry) {
           {
             subject: te.trainer_email_subject || "Session Booking",
             toRecipients: te.trainer_email_to.map(a => ({ emailAddress: { address: a } })),
-            body: { contentType: "HTML", content: "<p>" + (te.trainer_email_body||"").replace(/
-/g,"<br>") + "</p>" },
+            body: { contentType: "HTML", content: "<p>" + (te.trainer_email_body||"").split("\n").join("<br>") + "</p>" },
             isDraft: true
           }, token);
         if (trDraft && trDraft.id) {
