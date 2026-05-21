@@ -2307,10 +2307,14 @@ function openQueueItem(id) {
     ${isDeeca&&item.quote_section5?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.05em;margin-bottom:6px;">REQUEST FOR SERVICE — COMPLETED QUOTE</div><div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:12px;color:#14532d;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.8;">${esc(item.quote_section5)}</div></div>`:""}
     ${item.drafts&&item.drafts.length?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;">OUTLOOK DRAFTS READY</div>${item.drafts.map(function(d){return`<div style="font-size:12px;color:#15803d;padding:4px 0;">✓ ${esc(d.description||d.type)} → ${esc(d.to||"")}</div>`;}).join("")}</div>`:""}
     <div class="bk-detail-actions">
-      <button class="cal-btn green" onclick="approveItem(${item.id})">✓ Approve — Create Calendar & Confirm Drafts</button>
-      <button class="cal-btn" style="background:#dc2626;" onclick="rejectItem(${item.id})">✕ Reject</button>
-      ${isDeeca && SERVER_MODE ? `<button class="cal-btn" style="background:#15803d;" onclick="downloadSection5(${item.id})">📄 Download Section 5 Word Doc</button>` : ""}
-      ${isDeeca && !SERVER_MODE ? `<div style="font-size:12px;color:#64748b;padding:8px 0;">📄 Section 5 Word download available when running on server</div>` : ""}
+      ${(item.action_type==="booking"||item.action_type==="deeca_quote") ? `
+        <button class="cal-btn green" onclick="approveItem(${item.id})">✓ Approve — Create Calendar & Drafts</button>
+        <button class="cal-btn" style="background:#dc2626;" onclick="rejectItem(${item.id})">✕ Reject</button>
+      ` : `
+        <button class="cal-btn" style="background:#475569;" onclick="dismissItem(${item.id})">✕ Dismiss</button>
+      `}
+      ${isDeeca && SERVER_MODE ? `<button class="cal-btn" style="background:#15803d;" onclick="downloadSection5(${item.id})">📄 Download Completed Form</button>` : ""}
+      ${isDeeca && !SERVER_MODE ? `<div style="font-size:12px;color:#64748b;padding:8px 0;">📄 Document download available on server</div>` : ""}
     </div>
   `;
   document.getElementById("bk-detail-overlay").classList.add("open");
@@ -2327,7 +2331,10 @@ async function approveItem(id) {
       queueData = queueData.filter(function(i){ return i.id!==id; });
       renderQueue(queueData);
       updateQueueBadge(queueData.length);
-      alert("✓ Approved! Calendar event created. Check Outlook drafts to review and send the confirmation emails.");
+      const calCount = res.calendar ? res.calendar.length : 0;
+      const draftCount = res.drafts ? res.drafts.length : 0;
+      const errCount = res.errors ? res.errors.length : 0;
+      var msg = "Approved! Calendar: " + calCount + " event(s). Drafts: " + draftCount + "."; if(errCount>0) msg += " Errors: " + errCount + " — check Render logs."; alert(msg);
     } else {
       alert("Error approving: " + (res&&res.error ? res.error : "Unknown error"));
     }
@@ -2376,10 +2383,16 @@ async function downloadSection5(id) {
 }
 
 function rejectItem(id) {
-  if (!confirm("Reject this booking? No emails will be sent.")) return;
-  if (SERVER_MODE) {
-    apiCall("POST", "/api/review-queue/" + id + "/reject", { reason: "" });
-  }
+  if (!confirm("Reject this booking? No emails will be sent to the client or trainer.")) return;
+  if (SERVER_MODE) apiCall("POST", "/api/review-queue/" + id + "/reject", { reason: "" });
+  queueData = queueData.filter(function(i){ return i.id!==id; });
+  closeBkDetail();
+  renderQueue(queueData);
+  updateQueueBadge(queueData.length);
+}
+
+function dismissItem(id) {
+  if (SERVER_MODE) apiCall("POST", "/api/review-queue/" + id + "/dismiss");
   queueData = queueData.filter(function(i){ return i.id!==id; });
   closeBkDetail();
   renderQueue(queueData);
