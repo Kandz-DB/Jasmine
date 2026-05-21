@@ -800,18 +800,22 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
 
     // Values to fill in
     const today = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+
+    // Format CLASS_DATES as: Class 1 – Venue – DD/MM/YY (one per line, dates only — no full address)
+    // Jasmine returns CLASS_DATES as newline-separated readable dates
+    // We format them simply as Class 1 – Date, Class 2 – Date etc.
+    const rawDates = (fields.CLASS_DATES || "").split(/\n|,/).map(d => d.trim()).filter(Boolean);
+    const formattedDates = rawDates.map((d, i) => "Class " + (i+1) + " – " + d).join("\n");
+
     const fillMap = {
-      1: { 1: "Risk 2 Solution Group" },
-      2: { 1: "diane.k@risk2solution.com    Ph: 1300 459 970" },
-      3: { 1: fields.TRAINER_NAME ? "Personal Safety and Conflict Management" : "Personal Safety and Conflict Management" },
+      1: { 1: "Risk 2 Solution Pty Ltd" },
+      2: { 1: "training@risk2solution.com", 2: "Ph: 1300 459 970" },
+      3: { 1: "Personal Safety & Conflict Management" },
       4: { 1: fields.TRAINER_NAME || "" },
-      5: { 1: (fields.CLASS_DATES || "").replace(/\\n/g, ", ") },
+      5: { 1: formattedDates || fields.CLASS_DATES || "" },
       6: { 1: "Start time: " + (fields.START_TIME || "09:00"), 2: "Finish time: " + (fields.FINISH_TIME || "13:00") },
-      7: { 1: "20 (as per contracted rates)" },
-      8: { 1: "Training materials supplied by Risk 2 Solution Group" },
       10: { 1: fields.CLASS_COST_EX || "$0.00", 2: fields.CLASS_COST_INC || "$0.00" },
       11: { 1: fields.MATERIALS_EX || "$0.00", 2: fields.MATERIALS_INC || "$0.00" },
-      12: { 1: "$0.00", 2: "$0.00" },
       13: { 2: fields.TRAVEL_KM || "$0.00" },
       14: { 2: fields.ACCOM_MEALS || "$0.00" },
       15: { 1: fields.TOTAL_EX || "$0.00", 2: fields.TOTAL_INC || "$0.00" }
