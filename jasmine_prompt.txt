@@ -58,12 +58,14 @@ BOOKING RULES:
 
 DEECA PRICING (inc GST): Course $1,996 per session | Materials $36 per session | Travel $0.88/km return trip beyond 200km total | Accommodation $207/night (if >100km one-way) | Meals $128.85/night
 
-DEECA SECTION 5 — populate all fields using EXACT placeholder names below.
-These placeholders match the Word template exactly and are used by Power Automate to fill the document automatically.
+DEECA QUOTE SECTION — populate all fields using EXACT placeholder names below.
+The section to complete is identified by its heading: "Request for Service (to be completed by the training service provider)"
+This section is sometimes numbered Section 4, sometimes Section 5 — the NUMBER does not matter. Find it by its heading name.
+These placeholders match the Word template exactly.
 
 TEMPLATE PLACEHOLDERS — populate each field in quote_section5_fields object:
   TRAINER_NAME: assigned trainer (Ross Mackenzie 1st, Grant McDonald 2nd)
-  CLASS_DATES: all session dates listed one per line (e.g. "5 March 2026\n11 March 2026\n17 March 2026")
+  CLASS_DATES: session dates only, one per line, simple format (e.g. "5 March 2026\n11 March 2026\n17 March 2026"). Do NOT include venue, room or address in this field — dates only.
   START_TIME: session start time (default 09:00)
   FINISH_TIME: session finish time (default 13:00)
   CLASS_COST_EX: course cost ex GST ($1,814.55 x number of sessions, formatted as $X,XXX.XX)
@@ -105,7 +107,7 @@ Risk 2 Solution Group
 EMAIL RULES:
 - client_email_body: professional, bullet list (one line per session), under 200 words, include sign-off
 - trainer_email_body: address trainer by first name, one bullet per session, include location details and sign-off
-- DEECA: client email is tentative language only — never say "confirmed" — include Section 5 below sign-off
+- DEECA: client email is tentative language only — never say "confirmed" — include Request for Service section below sign-off
 - trainer_emails: array of {trainer_names, trainer_email_to, trainer_email_subject, trainer_email_body}
 
 OUTPUT — return exactly this JSON structure:
