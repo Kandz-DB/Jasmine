@@ -514,26 +514,41 @@ async function processInboundEmail(email, clientName, token) {
 
 // ── APPROVE BOOKING — creates calendar event + sends drafts ──────────────────
 async function approveQueueEntry(entry) {
+  console.log("Approving entry:", entry.id, "| Bookings:", (entry.bookings||[]).length, "| Drafts:", (entry.drafts||[]).length);
   const token = await getGraphToken();
+  const results = { calendar: [], drafts: [], errors: [] };
 
   for (const bk of (entry.bookings || [])) {
-    if (!bk.date || bk.date.toLowerCase() === "tbc") continue;
+    if (!bk.date || bk.date.toLowerCase() === "tbc") {
+      console.log("Skipping booking — date is TBC:", bk.session_type);
+      results.errors.push("Skipped " + bk.session_type + " — date is TBC");
+      continue;
+    }
 
     // Build calendar event datetime
-    const datePart = bk.date; // e.g. "5 March 2026"
+    const datePart = bk.date;
     const startTime = bk.session_start || "09:00";
     const endTime = bk.session_end || "13:00";
+    console.log("Creating calendar event:", datePart, startTime, "-", endTime, bk.session_type);
 
-    // Parse date for Graph API (needs ISO format)
+    // Parse date — try multiple formats
     let startDT, endDT;
     try {
-      const d = new Date(datePart + " " + startTime);
-      const e = new Date(datePart + " " + endTime);
-      if (isNaN(d.getTime())) throw new Error("Invalid date: " + datePart);
-      startDT = d.toISOString().replace(/\.\d{3}Z$/, "");
-      endDT = e.toISOString().replace(/\.\d{3}Z$/, "");
+      // Try "5 March 2026 09:00" format
+      let d = new Date(datePart + " " + startTime);
+      let e = new Date(datePart + " " + endTime);
+      // If that fails try adding year context
+      if (isNaN(d.getTime())) {
+        d = new Date(datePart.replace(/(\d+)\s+(\w+)\s+(\d+)/, "$2 $1 $3") + " " + startTime);
+        e = new Date(datePart.replace(/(\d+)\s+(\w+)\s+(\d+)/, "$2 $1 $3") + " " + endTime);
+      }
+      if (isNaN(d.getTime())) throw new Error("Could not parse date: " + datePart + " " + startTime);
+      startDT = d.toISOString().slice(0, 19);
+      endDT = e.toISOString().slice(0, 19);
+      console.log("Parsed datetime:", startDT, "to", endDT);
     } catch (err) {
-      console.error("Date parse error for calendar:", err.message);
+      console.error("Date parse error:", err.message);
+      results.errors.push("Date parse failed for " + bk.session_type + ": " + err.message);
       continue;
     }
 
@@ -579,29 +594,89 @@ async function approveQueueEntry(entry) {
         "/users/" + TRAINING_MAILBOX + "/calendar/events",
         calendarEvent, token);
       if (created && created.id) {
-        console.log("Calendar event created: " + calendarEvent.subject);
+        console.log("✓ Calendar event created:", calendarEvent.subject, "ID:", created.id);
         entry.calendar_event_id = created.id;
+        results.calendar.push(calendarEvent.subject);
+      } else if (created && created.error) {
+        console.error("Calendar API error:", JSON.stringify(created.error));
+        results.errors.push("Calendar error: " + JSON.stringify(created.error));
+      } else {
+        console.warn("Calendar: unexpected response:", JSON.stringify(created));
       }
     } catch (err) {
-      console.error("Calendar error:", err.message);
+      console.error("Calendar exception:", err.message);
+      results.errors.push("Calendar exception: " + err.message);
     }
   }
 
-  // Move drafts from Drafts to Sent (or just log that they exist)
-  // Drafts are already in training@risk2solution.com — Diane just needs to review and send
-  // We don't auto-send — Diane clicks Send in Outlook
+  // Create Outlook drafts if not already created during processing
+  if (entry.drafts && entry.drafts.length > 0) {
+    console.log("Drafts already created during processing:", entry.drafts.length, "drafts ready in Outlook");
+  } else {
+    // Drafts were not created during processing — create them now on approve
+    console.log("No drafts found — creating now on approve...");
+    if (entry.client_email_body && entry.client_email_to) {
+      try {
+        const clientDraft = await graphRequest("POST",
+          "/users/" + TRAINING_MAILBOX + "/messages",
+          {
+            subject: entry.client_email_subject || "Training Booking Confirmation",
+            toRecipients: [{ emailAddress: { address: entry.client_email_to } }],
+            body: { contentType: "HTML", content: "<p>" + (entry.client_email_body||"").replace(/
+/g,"<br>") + "</p>" },
+            isDraft: true
+          }, token);
+        if (clientDraft && clientDraft.id) {
+          console.log("✓ Client draft created on approve:", clientDraft.id);
+          results.drafts.push("Client email to " + entry.client_email_to);
+          if (!entry.drafts) entry.drafts = [];
+          entry.drafts.push({ type: "client", draft_id: clientDraft.id, to: entry.client_email_to, description: "Client confirmation" });
+        } else {
+          console.error("Client draft failed:", JSON.stringify(clientDraft));
+          results.errors.push("Client draft failed: " + JSON.stringify(clientDraft));
+        }
+      } catch (err) {
+        console.error("Client draft exception:", err.message);
+        results.errors.push("Client draft error: " + err.message);
+      }
+    }
+
+    for (const te of (entry.trainer_emails || [])) {
+      if (!te.trainer_email_body || !te.trainer_email_to || te.trainer_email_to.length === 0) continue;
+      try {
+        const trDraft = await graphRequest("POST",
+          "/users/" + TRAINING_MAILBOX + "/messages",
+          {
+            subject: te.trainer_email_subject || "Session Booking",
+            toRecipients: te.trainer_email_to.map(a => ({ emailAddress: { address: a } })),
+            body: { contentType: "HTML", content: "<p>" + (te.trainer_email_body||"").replace(/
+/g,"<br>") + "</p>" },
+            isDraft: true
+          }, token);
+        if (trDraft && trDraft.id) {
+          console.log("✓ Trainer draft created:", trDraft.id);
+          results.drafts.push("Trainer email to " + te.trainer_email_to.join(", "));
+        } else {
+          console.error("Trainer draft failed:", JSON.stringify(trDraft));
+          results.errors.push("Trainer draft failed: " + JSON.stringify(trDraft));
+        }
+      } catch (err) {
+        console.error("Trainer draft exception:", err.message);
+        results.errors.push("Trainer draft error: " + err.message);
+      }
+    }
+  }
 
   entry.status = "approved";
   entry.approved_at = new Date().toISOString();
+  entry.approve_results = results;
 
-  // Update bookings log status
   for (const bk of bookingsLog) {
-    if (bk.queue_id === entry.id) {
-      bk.status = "Confirmed";
-    }
+    if (bk.queue_id === entry.id) bk.status = "Confirmed";
   }
 
-  console.log("Entry " + entry.id + " approved.");
+  console.log("Entry", entry.id, "approved. Calendar:", results.calendar.length, "Drafts:", results.drafts.length, "Errors:", results.errors.length);
+  if (results.errors.length > 0) console.error("Approval errors:", results.errors);
 }
 
 // ── API ROUTES ────────────────────────────────────────────────────────────────
@@ -649,6 +724,14 @@ app.post("/api/review-queue/:id/reject", requireAuth, (req, res) => {
   for (const bk of bookingsLog) {
     if (bk.queue_id === entry.id) bk.status = "Rejected";
   }
+  res.json({ success: true });
+});
+
+app.post("/api/review-queue/:id/dismiss", requireAuth, (req, res) => {
+  const idx = reviewQueue.findIndex(e => e.id === parseInt(req.params.id));
+  if (idx === -1) return res.status(404).json({ error: "Not found" });
+  reviewQueue[idx].status = "dismissed";
+  reviewQueue[idx].dismissed_at = new Date().toISOString();
   res.json({ success: true });
 });
 
