@@ -20,10 +20,92 @@ const KANDIA_EMAIL = process.env.KANDIA_EMAIL || "kandia@risk2solution.com";
 
 const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
-// In-memory stores (no database yet — same pattern as Ariel)
+// ── TEST MODE ─────────────────────────────────────────────────────────────────
+// When TEST_MODE=true, ALL outgoing emails (client + trainer) and calendar
+// attendees are redirected to TEST_EMAIL (defaults to the training mailbox).
+// No real trainer or client emails are ever touched during testing.
+// Set TEST_MODE=false (or remove it) once you are happy with the flow and
+// are ready to supply real trainer email addresses.
+const TEST_MODE  = (process.env.TEST_MODE || "true").toLowerCase() !== "false";
+const TEST_EMAIL = process.env.TEST_EMAIL || TRAINING_MAILBOX;
+
+// Wrap every outgoing address through this function.
+// In TEST_MODE it returns the internal test mailbox; in production it returns
+// the real address as-is.
+function safeEmail(realAddress) {
+  if (TEST_MODE) return TEST_EMAIL;
+  return realAddress;
+}
+
+if (TEST_MODE) {
+  console.log("⚠  TEST MODE ACTIVE — all emails/invites will be sent to: " + TEST_EMAIL);
+  console.log("   Set TEST_MODE=false in your environment to use real addresses.");
+}
+
+// ── IN-MEMORY STORES + FILE PERSISTENCE ──────────────────────────────────────
+// Data lives in memory for speed and survives restarts via jasmine_store.json.
+// Atomic write (tmp → rename) means a crash mid-save never corrupts the file.
 const reviewQueue = [];
 const bookingsLog = [];
-const emailLog = [];
+const emailLog    = [];
+
+const DATA_DIR  = path.join(__dirname, "data");
+const DATA_FILE = path.join(DATA_DIR,  "jasmine_store.json");
+
+function persistLoad() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) {
+      console.log("No existing data file — starting fresh.");
+      return;
+    }
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    // Restore reviewQueue — convert stored base64 docx back to Buffers
+    for (const e of (data.reviewQueue || [])) {
+      if (e._docx_b64) {
+        e.original_docx = Buffer.from(e._docx_b64, "base64");
+        delete e._docx_b64;
+      }
+      reviewQueue.push(e);
+    }
+    bookingsLog.push(...(data.bookingsLog || []));
+    emailLog.push(...(data.emailLog || []));
+    console.log("Loaded persisted data — queue: " + reviewQueue.length +
+      ", bookings: " + bookingsLog.length + ", emails: " + emailLog.length);
+  } catch (err) {
+    console.error("persistLoad error:", err.message);
+  }
+}
+
+let _saveTimer = null;
+function persistSave() {
+  // Debounce: coalesce rapid back-to-back writes into one disk write after 500ms
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      const snapshot = {
+        reviewQueue: reviewQueue.map(e => {
+          const copy = { ...e };
+          // Binary docx buffers can't go into JSON — store as base64 instead
+          if (Buffer.isBuffer(copy.original_docx)) {
+            copy._docx_b64 = copy.original_docx.toString("base64");
+            delete copy.original_docx;
+          }
+          return copy;
+        }),
+        bookingsLog: [...bookingsLog],
+        emailLog:    [...emailLog]
+      };
+      // Atomic write: write to .tmp first, then rename over the real file.
+      // If the process dies mid-write, the old file is still intact.
+      const tmp = DATA_FILE + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2));
+      fs.renameSync(tmp, DATA_FILE);
+    } catch (err) {
+      console.error("persistSave error:", err.message);
+    }
+  }, 500);
+}
 
 let graphToken = null;
 let graphTokenExpiry = null;
@@ -113,28 +195,62 @@ async function graphRequest(method, endpoint, body, token) {
   try { return JSON.parse(text); } catch { return text; }
 }
 // ── CALENDAR SLOT CHECK ───────────────────────────────────────────────────────
-// Checks the training mailbox calendar for existing confirmed bookings in a slot.
-// Returns { available: bool, conflicts: [] }
-async function checkCalendarSlot(startDT, endDT, token) {
+// Checks the training mailbox calendar for:
+//   (a) confirmed/busy events overlapping the time slot
+//   (b) any event on the same day that mentions one of the given trainer names
+//       — catches cases where the same trainer is already booked for a different
+//         session on the same day even if the clock times differ
+// Returns { available: bool, conflicts: [], trainerConflicts: [] }
+async function checkCalendarSlot(startDT, endDT, token, trainerNames = []) {
   try {
     const t = token || await getGraphToken();
-    const result = await graphRequest("GET",
+
+    // (a) Check the exact time slot for busy events
+    const slotResult = await graphRequest("GET",
       "/users/" + TRAINING_MAILBOX + "/calendarView" +
       "?startDateTime=" + encodeURIComponent(startDT) +
       "&endDateTime=" + encodeURIComponent(endDT) +
-      "&$select=subject,start,end,showAs&$top=10",
+      "&$select=subject,start,end,showAs&$top=20",
       null, t
     );
-    if (result && result.value) {
-      const conflicts = result.value.filter(e =>
-        e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere"
+    const timeConflicts = (slotResult && slotResult.value || []).filter(e =>
+      e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere"
+    );
+
+    // (b) If trainers provided, check the full calendar day for same-trainer clashes
+    let trainerConflicts = [];
+    if (trainerNames.length > 0) {
+      // Widen the window to the full day (midnight-to-midnight) of the startDT date
+      const dayStart = startDT.slice(0, 10) + "T00:00:00";
+      const dayEnd   = startDT.slice(0, 10) + "T23:59:59";
+      const dayResult = await graphRequest("GET",
+        "/users/" + TRAINING_MAILBOX + "/calendarView" +
+        "?startDateTime=" + encodeURIComponent(dayStart) +
+        "&endDateTime=" + encodeURIComponent(dayEnd) +
+        "&$select=subject,body,start,end,showAs&$top=20",
+        null, t
       );
-      return { available: conflicts.length === 0, conflicts };
+      const dayEvents = (dayResult && dayResult.value || []).filter(e =>
+        e.showAs === "busy" || e.showAs === "tentative"
+      );
+      for (const ev of dayEvents) {
+        const haystack = ((ev.subject || "") + " " +
+          (ev.body && ev.body.content ? ev.body.content.replace(/<[^>]+>/g, " ") : "")).toLowerCase();
+        const clashingTrainer = trainerNames.find(n => n && haystack.includes(n.toLowerCase()));
+        if (clashingTrainer) {
+          trainerConflicts.push({ trainer: clashingTrainer, event: ev.subject, date: startDT.slice(0, 10) });
+        }
+      }
     }
-    return { available: true, conflicts: [] };
+
+    return {
+      available: timeConflicts.length === 0 && trainerConflicts.length === 0,
+      conflicts: timeConflicts,
+      trainerConflicts
+    };
   } catch (err) {
     console.error("Calendar slot check error:", err.message);
-    return { available: true, conflicts: [] }; // fail-open: assume available
+    return { available: true, conflicts: [], trainerConflicts: [] };
   }
 }
 
@@ -145,7 +261,9 @@ async function checkCalendarSlot(startDT, endDT, token) {
 // 3. Rewrites trainer emails from "please confirm availability" → "you have been booked"
 // 4. Flags any conflicts for Diane
 // On Diane's approval, tentative events are upgraded to confirmed (busy).
-async function checkAndPreBookCalendar(entry, jasmineParsed, token) {
+// Read-only calendar availability check — no events created, no emails sent.
+// Called during email processing so Jasmine can flag conflicts for Diane.
+async function checkCalendarAvailability(entry, jasmineParsed, token) {
   const results = { calendar_events: [], conflicts: [] };
   const bookings = jasmineParsed.bookings || [];
 
@@ -165,43 +283,59 @@ async function checkAndPreBookCalendar(entry, jasmineParsed, token) {
       endDT   = e.toISOString().slice(0, 19);
     } catch (err) { console.error("Date parse error in calendar check:", err.message); continue; }
 
-    // Check for conflicts in the training calendar
-    const slotCheck = await checkCalendarSlot(startDT, endDT, token);
+    // Collect trainer names and emails for conflict checking and later approval
+    const trainerNamesForCheck = bk.trainers || [];
+    const trainerEmailsForApprove = [];
+    for (const te of (jasmineParsed.trainer_emails || [])) {
+      for (const addr of (te.trainer_email_to || [])) {
+        if (addr && addr.includes("@")) trainerEmailsForApprove.push(addr);
+      }
+    }
+
+    // Check slot AND same-day trainer conflicts in the training calendar
+    const slotCheck = await checkCalendarSlot(startDT, endDT, token, trainerNamesForCheck);
 
     if (!slotCheck.available) {
       bk.calendar_conflict = true;
-      const conflictNames = slotCheck.conflicts.map(c => c.subject || "existing booking").join(", ");
-      bk.flags = [...(bk.flags || []), "⚠ Calendar conflict on " + bk.date + ": " + conflictNames];
-      results.conflicts.push({ session_type: bk.session_type, date: bk.date, conflicts: slotCheck.conflicts });
-      console.log("Calendar conflict for", bk.session_type, "on", bk.date, ":", conflictNames);
+      const timeMsg    = slotCheck.conflicts.map(c => c.subject || "existing booking").join(", ");
+      const trainerMsg = slotCheck.trainerConflicts.map(c => c.trainer + " already booked on " + c.date).join(", ");
+      const allMsg     = [timeMsg, trainerMsg].filter(Boolean).join(" | ");
+      bk.flags = [...(bk.flags || []), "⚠ Calendar conflict on " + bk.date + ": " + allMsg];
+      results.conflicts.push({
+        session_type: bk.session_type, date: bk.date,
+        conflicts: slotCheck.conflicts, trainerConflicts: slotCheck.trainerConflicts
+      });
+      console.log("Calendar conflict for", bk.session_type, "on", bk.date, ":", allMsg);
       continue;
-    }
-
-    // Slot is free — create tentative calendar event now
-    const trainerAttendees = [];
-    for (const te of (jasmineParsed.trainer_emails || [])) {
-      for (const addr of (te.trainer_email_to || [])) {
-        if (addr && addr.includes("@")) {
-          trainerAttendees.push({ emailAddress: { address: addr }, type: "required" });
-        }
-      }
     }
 
     const isFullDay = bk.full_day || false;
     const isDeeca   = bk.action_type === "deeca_quote";
 
-    const calEvent = {
-      subject: bk.calendar_title || (entry.client + " — " + bk.session_type + " [Tentative]"),
+    // ⚠ IMPORTANT: No attendees on tentative events.
+    // Adding attendees to a Graph calendar event fires meeting-request emails immediately.
+    // Trainers are added only when Diane approves — see approveQueueEntry().
+    // Store the trainer email addresses on bk so approve() can add them later.
+    // Slot is available — create a TENTATIVE calendar event to hold it.
+    // attendees: [] means no meeting-request emails are fired at this point.
+    // Attendees are added (and invites sent) only when Diane hits Confirm.
+    bk.trainer_emails_for_invite = trainerEmailsForApprove;
+
+    const isFullDay = bk.full_day || false;
+
+    const tentativeEvent = {
+      subject: (bk.calendar_title || (entry.client + " — " + bk.session_type)) + " [Tentative]",
       body: {
         contentType: "HTML",
-        content: "<p><strong>⏳ TENTATIVE — Pending Diane\'s Confirmation</strong></p>" +
+        content:
+          "<p><strong>⏳ TENTATIVE — Pending Diane's Confirmation</strong></p>" +
           "<p><strong>Client:</strong> " + entry.client + "</p>" +
           "<p><strong>Session:</strong> " + bk.session_type + "</p>" +
           "<p><strong>Trainers:</strong> " + (bk.trainers || []).join(", ") + "</p>" +
           "<p><strong>Venue:</strong> " + (bk.venue || "TBC") + "</p>" +
           "<p><strong>Participants:</strong> " + (bk.participants || "TBC") + "</p>" +
           (bk.calendar_note ? "<p><strong>Notes:</strong> " + bk.calendar_note + "</p>" : "") +
-          "<p><em>Pre-booked by Jasmine — awaiting Diane\'s approval before confirmation is sent.</em></p>"
+          "<p><em>Slot held by Jasmine — no invites sent yet. Diane must approve before trainers are notified.</em></p>"
       },
       start: isFullDay
         ? { date: new Date(bk.date).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
@@ -210,45 +344,25 @@ async function checkAndPreBookCalendar(entry, jasmineParsed, token) {
         ? { date: new Date(new Date(bk.date).getTime() + 86400000).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
         : { dateTime: endDT, timeZone: "Australia/Brisbane" },
       isAllDay: isFullDay,
-      showAs: "tentative",    // Always tentative until Diane confirms
+      showAs: "tentative",
       location: { displayName: bk.venue || "" },
-      attendees: trainerAttendees
+      attendees: []  // ← no attendees = no invite emails until Diane confirms
     };
 
     try {
       const created = await graphRequest("POST",
-        "/users/" + TRAINING_MAILBOX + "/calendar/events", calEvent, token);
+        "/users/" + TRAINING_MAILBOX + "/calendar/events", tentativeEvent, token);
       if (created && created.id) {
-        bk.calendar_event_id  = created.id;
+        bk.calendar_event_id   = created.id;
         bk.calendar_pre_booked = true;
+        bk.calendar_available  = true;
         results.calendar_events.push({ session_type: bk.session_type, date: bk.date, event_id: created.id });
-        console.log("✓ Tentative calendar event pre-booked:", bk.session_type, "on", bk.date, "| ID:", created.id);
+        console.log("✓ Tentative slot held:", bk.session_type, "on", bk.date,
+          "| no invites sent | ID:", created.id);
       }
     } catch (err) {
-      console.error("Tentative calendar event error:", err.message);
-    }
-  }
-
-  // Rewrite trainer emails: remove availability-request language → booking confirmation
-  if (jasmineParsed.trainer_emails && results.conflicts.length === 0) {
-    for (const te of jasmineParsed.trainer_emails) {
-      if (!te.trainer_email_body) continue;
-      te.trainer_email_body = te.trainer_email_body
-        .replace(/please (can you |could you )?confirm your availability/gi,
-          "please note you have been tentatively booked")
-        .replace(/could you please (let us know|confirm) (if you('re| are) available|your availability)/gi,
-          "you have been tentatively scheduled")
-        .replace(/are you available (for|on)/gi, "you have been tentatively booked for")
-        .replace(/please let (us|me) know if you('re| are) available/gi,
-          "please let us know if you have any issues with this booking")
-        .replace(/confirm (your )?availability/gi, "note your tentative booking")
-        .replace(/let me know your availability/gi, "note the below booking details");
-
-      // Add note that booking is tentative pending Diane's confirmation
-      if (!te.trainer_email_body.includes("tentative") &&
-          !te.trainer_email_body.includes("Diane")) {
-        te.trainer_email_body += "\n\nPlease note this booking is tentative pending final confirmation from Diane Kruger. A confirmation will follow once approved.";
-      }
+      console.error("Tentative event creation error:", err.message);
+      // Non-fatal — booking still goes to review queue, Diane can approve manually
     }
   }
 
@@ -645,24 +759,23 @@ async function processInboundEmail(email, clientName, token) {
     jasmineParsed = result.jasmineParsed;
     extractedFacts = result.extractedFacts;
 
-    // ── Calendar check + tentative pre-booking ────────────────────────────────
-    // Check training mailbox calendar for each booking slot.
-    // If free → create tentative event immediately so the slot is held.
-    // Trainer emails are rewritten from "please confirm availability" → "you have been booked".
-    // Diane still reviews and approves — approval upgrades events from tentative to confirmed.
+    // ── Calendar availability check (read-only) ─────────────────────────────
+    // Check the training calendar for conflicts and same-day trainer clashes.
+    // Results are stored on the booking objects and surfaced in the review queue
+    // so Diane can see availability before confirming.
+    // NO calendar events are created here — that only happens on Diane's approval.
     if (token && jasmineParsed.bookings && jasmineParsed.bookings.length > 0) {
-      const calResults = await checkAndPreBookCalendar(
+      const calResults = await checkCalendarAvailability(
         { client: clientName }, jasmineParsed, token
       );
-      if (calResults.calendar_events.length > 0) {
-        console.log("Pre-booked", calResults.calendar_events.length, "tentative calendar events.");
-      }
       if (calResults.conflicts.length > 0) {
         console.log("Calendar conflicts found:", calResults.conflicts.length, "slots.");
-        // Append conflict info to diane_summary
         const conflictNote = "\n\n⚠ CALENDAR CONFLICTS DETECTED: " +
-          calResults.conflicts.map(c => c.session_type + " on " + c.date).join(", ") +
-          " — please check the training calendar and resolve before confirming.";
+          calResults.conflicts.map(c => {
+            const trainerMsg = (c.trainerConflicts || []).map(tc => tc.trainer + " already booked that day").join(", ");
+            return c.session_type + " on " + c.date + (trainerMsg ? " (" + trainerMsg + ")" : "");
+          }).join(", ") +
+          " — please resolve before confirming.";
         jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + conflictNote;
       }
     }
@@ -725,58 +838,11 @@ async function processInboundEmail(email, clientName, token) {
     drafts: []
   };
 
-  // Create Outlook draft emails (in training@risk2solution.com drafts)
-  if (token && entry.client_email_body && entry.action_type !== "deeca_quote") {
-    try {
-      // Client confirmation draft
-      const clientDraft = await graphRequest("POST",
-        "/users/" + TRAINING_MAILBOX + "/messages",
-        {
-          subject: entry.client_email_subject || "Training Booking Confirmation",
-          toRecipients: [{ emailAddress: { address: entry.client_email_to || entry.from_email } }],
-          body: { contentType: "HTML", content: "<p>" + entry.client_email_body.replace(/\n/g, "<br>") + "</p>" },
-          isDraft: true
-        }, token);
-
-      if (clientDraft && clientDraft.id) {
-        entry.drafts.push({
-          type: "client",
-          draft_id: clientDraft.id,
-          to: entry.client_email_to,
-          subject: entry.client_email_subject,
-          description: "Client confirmation email"
-        });
-        console.log("Client draft created.");
-      }
-
-      // Trainer draft(s)
-      for (const te of (entry.trainer_emails || [])) {
-        if (!te.trainer_email_body) continue;
-        const trainerDraft = await graphRequest("POST",
-          "/users/" + TRAINING_MAILBOX + "/messages",
-          {
-            subject: te.trainer_email_subject || "Session Booking — " + clientName,
-            toRecipients: (te.trainer_email_to || []).map(addr => ({ emailAddress: { address: addr } })),
-            body: { contentType: "HTML", content: "<p>" + te.trainer_email_body.replace(/\n/g, "<br>") + "</p>" },
-            isDraft: true
-          }, token);
-
-        if (trainerDraft && trainerDraft.id) {
-          entry.drafts.push({
-            type: "trainer",
-            draft_id: trainerDraft.id,
-            to: (te.trainer_email_to || []).join(", "),
-            subject: te.trainer_email_subject,
-            description: "Trainer confirmation — " + (te.trainer_names || []).join(", ")
-          });
-          console.log("Trainer draft created for " + (te.trainer_names || []).join(", "));
-        }
-      }
-    } catch (err) {
-      console.error("Draft creation error:", err.message);
-      entry.drafts_error = err.message;
-    }
-  }
+  // ── NO DRAFTS CREATED HERE ──────────────────────────────────────────────────
+  // All email content (client_email_body, trainer_emails, etc.) is stored on
+  // the queue entry above. Drafts are only created when Diane hits Confirm
+  // in the review queue — see approveQueueEntry(). This ensures nothing is
+  // staged in Outlook until Diane has reviewed and approved the booking.
 
   // Log to bookings
   for (const bk of bookings) {
@@ -801,6 +867,7 @@ async function processInboundEmail(email, clientName, token) {
   });
 
   reviewQueue.push(entry);
+  persistSave(); // Write queue + bookings to disk
   console.log("Queue entry added for " + clientName + ". Drafts: " + entry.drafts.length);
 }
 
@@ -818,22 +885,41 @@ async function approveQueueEntry(entry) {
     }
 
     // If this slot was pre-booked as tentative during processing, upgrade to confirmed
+    // If this slot was tentatively pre-booked during processing, upgrade it now.
+    // PATCH adds attendees → Outlook fires the meeting-request invite to trainers.
     if (bk.calendar_event_id && bk.calendar_pre_booked) {
       try {
+        const inviteAttendees = [];
+        // Prefer the saved addresses from processing; fall back to trainer_emails
+        const savedAddrs = bk.trainer_emails_for_invite || [];
+        if (savedAddrs.length > 0) {
+          savedAddrs.forEach(addr =>
+            inviteAttendees.push({ emailAddress: { address: safeEmail(addr) }, type: "required" }));
+        } else {
+          for (const te of (entry.trainer_emails || [])) {
+            for (const addr of (te.trainer_email_to || [])) {
+              if (addr && addr.includes("@"))
+                inviteAttendees.push({ emailAddress: { address: safeEmail(addr) }, type: "required" });
+            }
+          }
+        }
         await graphRequest("PATCH",
           "/users/" + TRAINING_MAILBOX + "/calendar/events/" + bk.calendar_event_id,
           {
-            showAs: "busy",
-            subject: (bk.calendar_title || (entry.client + " — " + bk.session_type)).replace(" [Tentative]", "")
+            showAs: isDeeca ? "tentative" : "busy",
+            subject: (bk.calendar_title || (entry.client + " — " + bk.session_type))
+              .replace(" [Tentative]", ""),
+            attendees: inviteAttendees  // adding attendees now triggers invite emails
           }, token);
-        results.calendar.push(bk.session_type + " confirmed (upgraded from tentative)");
+        results.calendar.push(bk.session_type + " confirmed — trainer invites sent");
         entry.calendar_event_id = bk.calendar_event_id;
-        console.log("✓ Confirmed tentative event:", bk.session_type, "| ID:", bk.calendar_event_id);
+        console.log("✓ Tentative → confirmed:", bk.session_type,
+          "| invites sent to:", inviteAttendees.map(a => a.emailAddress.address).join(", ") || "none (TEST_MODE or no trainers)");
       } catch (err) {
-        console.error("Calendar confirm error:", err.message);
+        console.error("Calendar confirm/upgrade error:", err.message);
         results.errors.push("Calendar confirm error for " + bk.session_type + ": " + err.message);
       }
-      continue;  // Skip new-event creation for this booking
+      continue; // skip new-event creation below
     }
 
     // Build calendar event datetime (for bookings not pre-booked)
@@ -866,12 +952,12 @@ async function approveQueueEntry(entry) {
     const isDeeca = bk.action_type === "deeca_quote";
     const isFullDay = bk.full_day || false;
 
-    // Attendees — trainer emails (if we have them)
+    // Attendees — trainer emails routed through safeEmail() for TEST_MODE support
     const trainerAttendees = [];
     for (const te of (entry.trainer_emails || [])) {
       for (const addr of (te.trainer_email_to || [])) {
         if (addr && addr.includes("@")) {
-          trainerAttendees.push({ emailAddress: { address: addr }, type: "required" });
+          trainerAttendees.push({ emailAddress: { address: safeEmail(addr) }, type: "required" });
         }
       }
     }
@@ -931,9 +1017,9 @@ async function approveQueueEntry(entry) {
         const clientDraft = await graphRequest("POST",
           "/users/" + TRAINING_MAILBOX + "/messages",
           {
-            subject: entry.client_email_subject || "Training Booking Confirmation",
-            toRecipients: [{ emailAddress: { address: entry.client_email_to } }],
-            body: { contentType: "HTML", content: "<p>" + (entry.client_email_body||"").split("\n").join("<br>") + "</p>" },
+            subject: (TEST_MODE ? "[TEST] " : "") + (entry.client_email_subject || "Training Booking Confirmation"),
+            toRecipients: [{ emailAddress: { address: safeEmail(entry.client_email_to) } }],
+            body: { contentType: "HTML", content: (TEST_MODE ? "<div style=\"background:#fef9c3;border:1px solid #ca8a04;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;\"><strong>⚠ TEST MODE</strong> — Real recipient: <em>" + entry.client_email_to + "</em> · Redirected to " + TEST_EMAIL + "</div>" : "") + "<p>" + (entry.client_email_body||"").split("\n").join("<br>") + "</p>" },
             isDraft: true
           }, token);
         if (clientDraft && clientDraft.id) {
@@ -957,9 +1043,9 @@ async function approveQueueEntry(entry) {
         const trDraft = await graphRequest("POST",
           "/users/" + TRAINING_MAILBOX + "/messages",
           {
-            subject: te.trainer_email_subject || "Session Booking",
-            toRecipients: te.trainer_email_to.map(a => ({ emailAddress: { address: a } })),
-            body: { contentType: "HTML", content: "<p>" + (te.trainer_email_body||"").split("\n").join("<br>") + "</p>" },
+            subject: (TEST_MODE ? "[TEST] " : "") + (te.trainer_email_subject || "Session Booking"),
+            toRecipients: te.trainer_email_to.map(a => ({ emailAddress: { address: safeEmail(a) } })),
+            body: { contentType: "HTML", content: (TEST_MODE ? "<div style=\"background:#fef9c3;border:1px solid #ca8a04;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;\"><strong>⚠ TEST MODE</strong> — Real recipient(s): <em>" + te.trainer_email_to.join(", ") + "</em> · Redirected to " + TEST_EMAIL + "</div>" : "") + "<p>" + (te.trainer_email_body||"").split("\n").join("<br>") + "</p>" },
             isDraft: true
           }, token);
         if (trDraft && trDraft.id) {
@@ -983,6 +1069,7 @@ async function approveQueueEntry(entry) {
   for (const bk of bookingsLog) {
     if (bk.queue_id === entry.id) bk.status = "Confirmed";
   }
+  persistSave(); // Persist confirmed status
 
   console.log("Entry", entry.id, "approved. Calendar:", results.calendar.length, "Drafts:", results.drafts.length, "Errors:", results.errors.length);
   if (results.errors.length > 0) console.error("Approval errors:", results.errors);
@@ -1033,14 +1120,74 @@ app.post("/api/review-queue/:id/reject", requireAuth, (req, res) => {
   for (const bk of bookingsLog) {
     if (bk.queue_id === entry.id) bk.status = "Rejected";
   }
+  // Delete any tentative calendar events that were pre-booked during processing
+  // so the slot is freed up and no phantom events remain in the calendar.
+  (async () => {
+    try {
+      const t = await getGraphToken();
+      for (const bk of (entry.bookings || [])) {
+        if (bk.calendar_event_id && bk.calendar_pre_booked) {
+          await graphRequest("DELETE",
+            "/users/" + TRAINING_MAILBOX + "/calendar/events/" + bk.calendar_event_id,
+            null, t);
+          console.log("Deleted tentative event on reject:", bk.session_type, bk.calendar_event_id);
+        }
+      }
+    } catch (err) {
+      console.error("Reject — calendar cleanup error:", err.message);
+    }
+  })();
+  // Delete Outlook drafts that were staged during processing
+  (async () => {
+    try {
+      const t = await getGraphToken();
+      for (const draft of (entry.drafts || [])) {
+        if (draft.draft_id) {
+          await graphRequest("DELETE",
+            "/users/" + TRAINING_MAILBOX + "/messages/" + draft.draft_id,
+            null, t);
+          console.log("Deleted draft on reject:", draft.description);
+        }
+      }
+    } catch (err) {
+      console.error("Reject — draft cleanup error:", err.message);
+    }
+  })();
+  persistSave();
   res.json({ success: true });
 });
 
 app.post("/api/review-queue/:id/dismiss", requireAuth, (req, res) => {
   const idx = reviewQueue.findIndex(e => e.id === parseInt(req.params.id));
   if (idx === -1) return res.status(404).json({ error: "Not found" });
-  reviewQueue[idx].status = "dismissed";
-  reviewQueue[idx].dismissed_at = new Date().toISOString();
+  const dismissedEntry = reviewQueue[idx];
+  dismissedEntry.status = "dismissed";
+  dismissedEntry.dismissed_at = new Date().toISOString();
+  // Clean up calendar events and drafts staged for this entry
+  (async () => {
+    try {
+      const t = await getGraphToken();
+      for (const bk of (dismissedEntry.bookings || [])) {
+        if (bk.calendar_event_id && bk.calendar_pre_booked) {
+          await graphRequest("DELETE",
+            "/users/" + TRAINING_MAILBOX + "/calendar/events/" + bk.calendar_event_id,
+            null, t);
+          console.log("Deleted tentative event on dismiss:", bk.session_type);
+        }
+      }
+      for (const draft of (dismissedEntry.drafts || [])) {
+        if (draft.draft_id) {
+          await graphRequest("DELETE",
+            "/users/" + TRAINING_MAILBOX + "/messages/" + draft.draft_id,
+            null, t);
+          console.log("Deleted draft on dismiss:", draft.description);
+        }
+      }
+    } catch (err) {
+      console.error("Dismiss — cleanup error:", err.message);
+    }
+  })();
+  persistSave();
   res.json({ success: true });
 });
 
@@ -1273,10 +1420,11 @@ app.get("*", (req, res) => {
 // ── START ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log("Jasmine is running on port " + PORT);
+  persistLoad(); // Restore reviewQueue, bookingsLog, emailLog from disk
   if (AZURE_CLIENT_ID) {
     pollInbox();
-    setInterval(pollInbox, 10 * 60 * 1000); // Poll every 10 minutes
-    console.log("Email polling started — every 10 minutes.");
+    setInterval(pollInbox, 60 * 60 * 1000); // Poll every 60 minutes
+    console.log("Email polling started — every 60 minutes.");
   } else {
     console.log("Azure not configured — email polling disabled. Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET to enable.");
   }
