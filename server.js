@@ -519,10 +519,20 @@ ${emailContent.slice(0, 20000)}`;
   // Step 2: Apply Jasmine's rules and produce JSON
   const step2Res = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 5000,
+    max_tokens: 8000,  // needs headroom for large VA batches with many sessions
     system: [{ type: "text", text: JASMINE_PROC_SYS, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: extractedFacts }]
   });
+
+  // Detect truncation before attempting to parse — a cut-off response produces
+  // broken JSON that crashes with a misleading "Unterminated string" error.
+  if (step2Res.stop_reason === "max_tokens") {
+    throw new Error(
+      "Jasmine's JSON response was cut off (max_tokens reached). " +
+      "The email likely contains more sessions than usual. " +
+      "Try splitting the email or processing sessions in smaller batches."
+    );
+  }
 
   const text = step2Res.content[0].text || "{}";
   let clean = text.replace(/```json|```/g, "").trim();
