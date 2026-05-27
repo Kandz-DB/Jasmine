@@ -112,6 +112,150 @@ async function graphRequest(method, endpoint, body, token) {
   const text = await res.text();
   try { return JSON.parse(text); } catch { return text; }
 }
+// ── CALENDAR SLOT CHECK ───────────────────────────────────────────────────────
+// Checks the training mailbox calendar for existing confirmed bookings in a slot.
+// Returns { available: bool, conflicts: [] }
+async function checkCalendarSlot(startDT, endDT, token) {
+  try {
+    const t = token || await getGraphToken();
+    const result = await graphRequest("GET",
+      "/users/" + TRAINING_MAILBOX + "/calendarView" +
+      "?startDateTime=" + encodeURIComponent(startDT) +
+      "&endDateTime=" + encodeURIComponent(endDT) +
+      "&$select=subject,start,end,showAs&$top=10",
+      null, t
+    );
+    if (result && result.value) {
+      const conflicts = result.value.filter(e =>
+        e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere"
+      );
+      return { available: conflicts.length === 0, conflicts };
+    }
+    return { available: true, conflicts: [] };
+  } catch (err) {
+    console.error("Calendar slot check error:", err.message);
+    return { available: true, conflicts: [] }; // fail-open: assume available
+  }
+}
+
+// ── CALENDAR PRE-BOOKING ──────────────────────────────────────────────────────
+// After Jasmine parses an email:
+// 1. Checks the training calendar for each booking slot
+// 2. If free → creates a TENTATIVE calendar event immediately
+// 3. Rewrites trainer emails from "please confirm availability" → "you have been booked"
+// 4. Flags any conflicts for Diane
+// On Diane's approval, tentative events are upgraded to confirmed (busy).
+async function checkAndPreBookCalendar(entry, jasmineParsed, token) {
+  const results = { calendar_events: [], conflicts: [] };
+  const bookings = jasmineParsed.bookings || [];
+
+  for (const bk of bookings) {
+    if (!bk.date || bk.date.toLowerCase() === "tbc") {
+      console.log("Skipping calendar check — date is TBC for:", bk.session_type);
+      continue;
+    }
+
+    // Parse dates to ISO
+    let startDT, endDT;
+    try {
+      const d = new Date(bk.date + " " + (bk.session_start || "09:00"));
+      const e = new Date(bk.date + " " + (bk.session_end || "13:00"));
+      if (isNaN(d.getTime())) { console.warn("Could not parse date for calendar check:", bk.date); continue; }
+      startDT = d.toISOString().slice(0, 19);
+      endDT   = e.toISOString().slice(0, 19);
+    } catch (err) { console.error("Date parse error in calendar check:", err.message); continue; }
+
+    // Check for conflicts in the training calendar
+    const slotCheck = await checkCalendarSlot(startDT, endDT, token);
+
+    if (!slotCheck.available) {
+      bk.calendar_conflict = true;
+      const conflictNames = slotCheck.conflicts.map(c => c.subject || "existing booking").join(", ");
+      bk.flags = [...(bk.flags || []), "⚠ Calendar conflict on " + bk.date + ": " + conflictNames];
+      results.conflicts.push({ session_type: bk.session_type, date: bk.date, conflicts: slotCheck.conflicts });
+      console.log("Calendar conflict for", bk.session_type, "on", bk.date, ":", conflictNames);
+      continue;
+    }
+
+    // Slot is free — create tentative calendar event now
+    const trainerAttendees = [];
+    for (const te of (jasmineParsed.trainer_emails || [])) {
+      for (const addr of (te.trainer_email_to || [])) {
+        if (addr && addr.includes("@")) {
+          trainerAttendees.push({ emailAddress: { address: addr }, type: "required" });
+        }
+      }
+    }
+
+    const isFullDay = bk.full_day || false;
+    const isDeeca   = bk.action_type === "deeca_quote";
+
+    const calEvent = {
+      subject: bk.calendar_title || (entry.client + " — " + bk.session_type + " [Tentative]"),
+      body: {
+        contentType: "HTML",
+        content: "<p><strong>⏳ TENTATIVE — Pending Diane\'s Confirmation</strong></p>" +
+          "<p><strong>Client:</strong> " + entry.client + "</p>" +
+          "<p><strong>Session:</strong> " + bk.session_type + "</p>" +
+          "<p><strong>Trainers:</strong> " + (bk.trainers || []).join(", ") + "</p>" +
+          "<p><strong>Venue:</strong> " + (bk.venue || "TBC") + "</p>" +
+          "<p><strong>Participants:</strong> " + (bk.participants || "TBC") + "</p>" +
+          (bk.calendar_note ? "<p><strong>Notes:</strong> " + bk.calendar_note + "</p>" : "") +
+          "<p><em>Pre-booked by Jasmine — awaiting Diane\'s approval before confirmation is sent.</em></p>"
+      },
+      start: isFullDay
+        ? { date: new Date(bk.date).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
+        : { dateTime: startDT, timeZone: "Australia/Brisbane" },
+      end: isFullDay
+        ? { date: new Date(new Date(bk.date).getTime() + 86400000).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
+        : { dateTime: endDT, timeZone: "Australia/Brisbane" },
+      isAllDay: isFullDay,
+      showAs: "tentative",    // Always tentative until Diane confirms
+      location: { displayName: bk.venue || "" },
+      attendees: trainerAttendees
+    };
+
+    try {
+      const created = await graphRequest("POST",
+        "/users/" + TRAINING_MAILBOX + "/calendar/events", calEvent, token);
+      if (created && created.id) {
+        bk.calendar_event_id  = created.id;
+        bk.calendar_pre_booked = true;
+        results.calendar_events.push({ session_type: bk.session_type, date: bk.date, event_id: created.id });
+        console.log("✓ Tentative calendar event pre-booked:", bk.session_type, "on", bk.date, "| ID:", created.id);
+      }
+    } catch (err) {
+      console.error("Tentative calendar event error:", err.message);
+    }
+  }
+
+  // Rewrite trainer emails: remove availability-request language → booking confirmation
+  if (jasmineParsed.trainer_emails && results.conflicts.length === 0) {
+    for (const te of jasmineParsed.trainer_emails) {
+      if (!te.trainer_email_body) continue;
+      te.trainer_email_body = te.trainer_email_body
+        .replace(/please (can you |could you )?confirm your availability/gi,
+          "please note you have been tentatively booked")
+        .replace(/could you please (let us know|confirm) (if you('re| are) available|your availability)/gi,
+          "you have been tentatively scheduled")
+        .replace(/are you available (for|on)/gi, "you have been tentatively booked for")
+        .replace(/please let (us|me) know if you('re| are) available/gi,
+          "please let us know if you have any issues with this booking")
+        .replace(/confirm (your )?availability/gi, "note your tentative booking")
+        .replace(/let me know your availability/gi, "note the below booking details");
+
+      // Add note that booking is tentative pending Diane's confirmation
+      if (!te.trainer_email_body.includes("tentative") &&
+          !te.trainer_email_body.includes("Diane")) {
+        te.trainer_email_body += "\n\nPlease note this booking is tentative pending final confirmation from Diane Kruger. A confirmation will follow once approved.";
+      }
+    }
+  }
+
+  return results;
+}
+
+
 
 // ── JASMINE SYSTEM PROMPT (PROC_SYS) ─────────────────────────────────────────
 // Load from file if it exists, otherwise use inline
@@ -258,8 +402,8 @@ ${emailContent.slice(0, 20000)}`;
   }
 
   const step1Res = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 3000,
+    model: "claude-haiku-4-5-20251001",  // Haiku — fast, cheap, perfect for extraction
+    max_tokens: 2000,
     messages: [{ role: "user", content: step1Content }]
   });
 
@@ -268,8 +412,8 @@ ${emailContent.slice(0, 20000)}`;
   // Step 2: Apply Jasmine's rules and produce JSON
   const step2Res = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 8000,
-    system: JASMINE_PROC_SYS,
+    max_tokens: 5000,
+    system: [{ type: "text", text: JASMINE_PROC_SYS, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: extractedFacts }]
   });
 
@@ -500,6 +644,28 @@ async function processInboundEmail(email, clientName, token) {
     const result = await processEmailWithJasmine(emailContent, inlineImages);
     jasmineParsed = result.jasmineParsed;
     extractedFacts = result.extractedFacts;
+
+    // ── Calendar check + tentative pre-booking ────────────────────────────────
+    // Check training mailbox calendar for each booking slot.
+    // If free → create tentative event immediately so the slot is held.
+    // Trainer emails are rewritten from "please confirm availability" → "you have been booked".
+    // Diane still reviews and approves — approval upgrades events from tentative to confirmed.
+    if (token && jasmineParsed.bookings && jasmineParsed.bookings.length > 0) {
+      const calResults = await checkAndPreBookCalendar(
+        { client: clientName }, jasmineParsed, token
+      );
+      if (calResults.calendar_events.length > 0) {
+        console.log("Pre-booked", calResults.calendar_events.length, "tentative calendar events.");
+      }
+      if (calResults.conflicts.length > 0) {
+        console.log("Calendar conflicts found:", calResults.conflicts.length, "slots.");
+        // Append conflict info to diane_summary
+        const conflictNote = "\n\n⚠ CALENDAR CONFLICTS DETECTED: " +
+          calResults.conflicts.map(c => c.session_type + " on " + c.date).join(", ") +
+          " — please check the training calendar and resolve before confirming.";
+        jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + conflictNote;
+      }
+    }
   } catch (err) {
     console.error("Jasmine processing error:", err.message);
     reviewQueue.push({
@@ -651,7 +817,26 @@ async function approveQueueEntry(entry) {
       continue;
     }
 
-    // Build calendar event datetime
+    // If this slot was pre-booked as tentative during processing, upgrade to confirmed
+    if (bk.calendar_event_id && bk.calendar_pre_booked) {
+      try {
+        await graphRequest("PATCH",
+          "/users/" + TRAINING_MAILBOX + "/calendar/events/" + bk.calendar_event_id,
+          {
+            showAs: "busy",
+            subject: (bk.calendar_title || (entry.client + " — " + bk.session_type)).replace(" [Tentative]", "")
+          }, token);
+        results.calendar.push(bk.session_type + " confirmed (upgraded from tentative)");
+        entry.calendar_event_id = bk.calendar_event_id;
+        console.log("✓ Confirmed tentative event:", bk.session_type, "| ID:", bk.calendar_event_id);
+      } catch (err) {
+        console.error("Calendar confirm error:", err.message);
+        results.errors.push("Calendar confirm error for " + bk.session_type + ": " + err.message);
+      }
+      continue;  // Skip new-event creation for this booking
+    }
+
+    // Build calendar event datetime (for bookings not pre-booked)
     const datePart = bk.date;
     const startTime = bk.session_start || "09:00";
     const endTime = bk.session_end || "13:00";
@@ -926,9 +1111,9 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 4000,
-      system: JASMINE_CHAT_SYS,
-      messages
+      max_tokens: 2000,
+      system: [{ type: "text", text: JASMINE_CHAT_SYS, cache_control: { type: "ephemeral" } }],
+      messages: messages.slice(-10)   // sliding window — last 10 messages only
     });
     res.json({ message: response.content[0].text });
   } catch (err) {
