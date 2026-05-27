@@ -309,13 +309,6 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
       continue;
     }
 
-    const isFullDay = bk.full_day || false;
-    const isDeeca   = bk.action_type === "deeca_quote";
-
-    // ⚠ IMPORTANT: No attendees on tentative events.
-    // Adding attendees to a Graph calendar event fires meeting-request emails immediately.
-    // Trainers are added only when Diane approves — see approveQueueEntry().
-    // Store the trainer email addresses on bk so approve() can add them later.
     // Slot is available — create a TENTATIVE calendar event to hold it.
     // attendees: [] means no meeting-request emails are fired at this point.
     // Attendees are added (and invites sent) only when Diane hits Confirm.
