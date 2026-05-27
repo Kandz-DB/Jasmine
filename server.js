@@ -404,64 +404,78 @@ async function processInboundEmail(email, clientName, token) {
   let originalDocxName = "";
   const inlineImages = []; // { contentType, base64 } for Claude vision
 
-  if (email.hasAttachments) {
-    try {
-      // Fetch attachment list — use $expand to get contentBytes inline for small files
-      // For larger files we fetch each one individually
-      const attachments = await graphRequest("GET",
-        "/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/attachments?$select=id,name,contentType,size,isInline,contentBytes",
-        null, token);
+  // Fetch raw MIME email to extract inline images and attachments reliably
+  // This is the same format as an .eml file — most reliable way to get inline images
+  try {
+    const token2 = token || await getGraphToken();
+    const mimeUrl = "https://graph.microsoft.com/v1.0/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/$value";
+    const mimeRes = await fetch(mimeUrl, {
+      headers: { "Authorization": "Bearer " + token2, "Accept": "text/plain" }
+    });
 
-      if (attachments && attachments.value) {
-        for (const att of attachments.value) {
-          const name = (att.name || "").toLowerCase();
-          const contentType = (att.contentType || "").toLowerCase();
-          const isImage = contentType.startsWith("image/") || name.match(/\.(png|jpg|jpeg|gif|bmp|webp)$/i);
-          const isWord = name.endsWith(".docx") || name.endsWith(".doc");
-          const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv");
+    if (mimeRes.ok) {
+      const rawMime = await mimeRes.text();
+      console.log("Raw MIME fetched: " + rawMime.length + " chars");
 
-          // If contentBytes is missing (large file), fetch it directly
-          let contentBytes = att.contentBytes;
-          if (!contentBytes && (isImage || isWord)) {
-            try {
-              console.log("Fetching full attachment bytes for: " + att.name);
-              const fullAtt = await graphRequest("GET",
-                "/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/attachments/" + att.id,
-                null, token);
-              contentBytes = fullAtt && fullAtt.contentBytes ? fullAtt.contentBytes : null;
-            } catch (e) {
-              console.error("Could not fetch attachment bytes:", att.name, e.message);
-            }
-          }
+      // Parse MIME parts to find images and Word docs
+      const boundaryMatch = rawMime.match(/boundary="?([^"\r\n;]+)"?/i);
+      if (boundaryMatch) {
+        const boundary = boundaryMatch[1];
+        const parts = rawMime.split("--" + boundary);
 
-          if (isWord && contentBytes) {
-            originalDocxBuffer = Buffer.from(contentBytes, "base64");
-            originalDocxName = att.name || "attachment.docx";
-            try {
-              const result = await mammoth.extractRawText({ buffer: originalDocxBuffer });
-              if (result.value) {
-                attachmentText += "\n\n=== ATTACHED DOCUMENT: " + att.name + " ===\n" + result.value.trim();
-                console.log("Read Word attachment: " + att.name + " (" + result.value.length + " chars)");
+        for (const part of parts) {
+          if (!part || part.trim() === "--") continue;
+          const headerEnd = part.indexOf("\r\n\r\n") !== -1 ? part.indexOf("\r\n\r\n") + 4 : part.indexOf("\n\n") + 2;
+          const headers = part.slice(0, headerEnd).toLowerCase();
+          const partBody = part.slice(headerEnd);
+
+          const ctMatch = part.match(/Content-Type:\s*([^\r\n;]+)/i);
+          const nameMatch = part.match(/(?:filename|name)="?([^"\r\n;]+)"?/i);
+          const encMatch = part.match(/Content-Transfer-Encoding:\s*(\S+)/i);
+
+          const ct = ctMatch ? ctMatch[1].trim().toLowerCase() : "";
+          const fname = nameMatch ? nameMatch[1].trim().toLowerCase() : "";
+          const enc = encMatch ? encMatch[1].trim().toLowerCase() : "";
+
+          const isImage = ct.startsWith("image/");
+          const isWord = fname.endsWith(".docx") || fname.endsWith(".doc");
+          const isExcel = fname.endsWith(".xlsx") || fname.endsWith(".xls") || fname.endsWith(".csv");
+
+          if (enc === "base64") {
+            const b64 = partBody.replace(/[\r\n\s]/g, "");
+
+            if (isImage && b64.length > 100) {
+              const mediaType = ct.split(";")[0].trim() || "image/png";
+              inlineImages.push({ mediaType, base64: b64 });
+              console.log("Extracted inline image from MIME: " + (fname || ct) + " (" + b64.length + " chars b64)");
+            } else if (isWord && b64.length > 100) {
+              try {
+                originalDocxBuffer = Buffer.from(b64, "base64");
+                originalDocxName = fname || "attachment.docx";
+                const result = await mammoth.extractRawText({ buffer: originalDocxBuffer });
+                if (result.value) {
+                  attachmentText += "\n\n=== ATTACHED DOCUMENT: " + fname + " ===\n" + result.value.trim();
+                  console.log("Extracted Word doc from MIME: " + fname + " (" + result.value.length + " chars)");
+                }
+              } catch (err) {
+                console.error("mammoth MIME error:", err.message);
               }
-            } catch (err) {
-              console.error("mammoth error:", err.message);
+            } else if (isExcel) {
+              attachmentText += "\n\n=== ATTACHED FILE: " + fname + " (Excel/CSV) ===";
             }
-          } else if (isImage && contentBytes) {
-            const mediaType = contentType.startsWith("image/") ? contentType.split(";")[0].trim() : "image/png";
-            inlineImages.push({ mediaType, base64: contentBytes });
-            console.log("Captured image for vision: " + (att.name || "image") + " (" + mediaType + ") isInline=" + att.isInline);
-          } else if (isImage && !contentBytes) {
-            console.warn("Image found but could not get contentBytes: " + att.name);
-          } else if (isExcel) {
-            attachmentText += "\n\n=== ATTACHED FILE: " + att.name + " (Excel/CSV) ===";
           }
         }
+      } else {
+        console.log("No MIME boundary found — simple email, no attachments to parse");
       }
-      console.log("Attachments processed — images for vision: " + inlineImages.length + ", docx: " + (originalDocxBuffer ? "yes" : "no"));
-    } catch (err) {
-      console.error("Attachment fetch error:", err.message);
+    } else {
+      console.warn("Could not fetch raw MIME:", mimeRes.status, mimeRes.statusText);
     }
+  } catch (err) {
+    console.error("MIME fetch error:", err.message);
   }
+
+  console.log("MIME parse complete — images: " + inlineImages.length + ", docx: " + (originalDocxBuffer ? "yes" : "no") + ", attachmentText: " + attachmentText.length + " chars");
 
   // If client was not detected from header, try attachment text
   if ((clientName === "Unknown — Internal Forward" || clientName === "INTERNAL") && attachmentText) {
