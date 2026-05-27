@@ -990,7 +990,7 @@ async function sendMsg(){
         method:"POST",
         headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true","anthropic-beta":"prompt-caching-2024-07-31"},
         body:JSON.stringify({
-          model:"claude-sonnet-4-6",
+          model:"claude-haiku-4-5-20251001",
           max_tokens:1500,
           system:[{type:"text",text:SYS,cache_control:{type:"ephemeral"}}],
           messages:windowedHist
@@ -2458,7 +2458,7 @@ function dismissItem(id) {
 
 async function reprocessAll() {
   if (!SERVER_MODE) { alert("Requires server mode."); return; }
-  if (!confirm("Force reprocess all recent emails? This will re-run Jasmine on emails already tagged as processed. Use for testing only.")) return;
+  if (!confirm("Force reprocess recent emails?\n\nJasmine will skip any already in the review queue (deduplication), but may still trigger API calls for unqueued emails.\n\nUse for missed emails only — not routine testing.")) return;
   const btn = document.querySelector("[onclick='reprocessAll()']");
   if (btn) { btn.disabled=true; btn.textContent="Reprocessing…"; }
   const res = await apiCall("POST", "/api/reprocess-all");
