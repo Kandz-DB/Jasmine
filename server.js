@@ -288,7 +288,7 @@ async function pollInbox() {
   try {
     const token = await getGraphToken();
     const result = await graphRequest("GET",
-      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=20&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,webLink",
+      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=20&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,webLink,conversationId",
       null, token);
 
     if (!result || !result.value) { console.log("No emails found."); return; }
@@ -406,41 +406,58 @@ async function processInboundEmail(email, clientName, token) {
 
   if (email.hasAttachments) {
     try {
+      // Fetch attachment list — use $expand to get contentBytes inline for small files
+      // For larger files we fetch each one individually
       const attachments = await graphRequest("GET",
-        "/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/attachments",
+        "/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/attachments?$select=id,name,contentType,size,isInline,contentBytes",
         null, token);
 
       if (attachments && attachments.value) {
         for (const att of attachments.value) {
           const name = (att.name || "").toLowerCase();
           const contentType = (att.contentType || "").toLowerCase();
+          const isImage = contentType.startsWith("image/") || name.match(/\.(png|jpg|jpeg|gif|bmp|webp)$/i);
+          const isWord = name.endsWith(".docx") || name.endsWith(".doc");
+          const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv");
 
-          if (name.endsWith(".docx") || name.endsWith(".doc")) {
-            if (att.contentBytes) {
-              originalDocxBuffer = Buffer.from(att.contentBytes, "base64");
-              originalDocxName = att.name || "attachment.docx";
-              try {
-                const result = await mammoth.extractRawText({ buffer: originalDocxBuffer });
-                if (result.value) {
-                  attachmentText += "\n\n=== ATTACHED DOCUMENT: " + att.name + " ===\n" + result.value.trim();
-                  console.log("Read Word attachment: " + att.name + " (" + result.value.length + " chars)");
-                }
-              } catch (err) {
-                console.error("mammoth error:", err.message);
+          // If contentBytes is missing (large file), fetch it directly
+          let contentBytes = att.contentBytes;
+          if (!contentBytes && (isImage || isWord)) {
+            try {
+              console.log("Fetching full attachment bytes for: " + att.name);
+              const fullAtt = await graphRequest("GET",
+                "/users/" + TRAINING_MAILBOX + "/messages/" + email.id + "/attachments/" + att.id,
+                null, token);
+              contentBytes = fullAtt && fullAtt.contentBytes ? fullAtt.contentBytes : null;
+            } catch (e) {
+              console.error("Could not fetch attachment bytes:", att.name, e.message);
+            }
+          }
+
+          if (isWord && contentBytes) {
+            originalDocxBuffer = Buffer.from(contentBytes, "base64");
+            originalDocxName = att.name || "attachment.docx";
+            try {
+              const result = await mammoth.extractRawText({ buffer: originalDocxBuffer });
+              if (result.value) {
+                attachmentText += "\n\n=== ATTACHED DOCUMENT: " + att.name + " ===\n" + result.value.trim();
+                console.log("Read Word attachment: " + att.name + " (" + result.value.length + " chars)");
               }
+            } catch (err) {
+              console.error("mammoth error:", err.message);
             }
-          } else if (contentType.startsWith("image/") || name.match(/\.(png|jpg|jpeg|gif|bmp|webp)$/)) {
-            // Inline image — send to Claude vision
-            if (att.contentBytes) {
-              const mediaType = contentType.startsWith("image/") ? contentType.split(";")[0] : "image/png";
-              inlineImages.push({ mediaType, base64: att.contentBytes });
-              console.log("Found inline image: " + (att.name || "image") + " (" + mediaType + ")");
-            }
-          } else if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
-            attachmentText += "\n\n=== ATTACHED FILE: " + att.name + " (Excel/CSV — extract key data) ===";
+          } else if (isImage && contentBytes) {
+            const mediaType = contentType.startsWith("image/") ? contentType.split(";")[0].trim() : "image/png";
+            inlineImages.push({ mediaType, base64: contentBytes });
+            console.log("Captured image for vision: " + (att.name || "image") + " (" + mediaType + ") isInline=" + att.isInline);
+          } else if (isImage && !contentBytes) {
+            console.warn("Image found but could not get contentBytes: " + att.name);
+          } else if (isExcel) {
+            attachmentText += "\n\n=== ATTACHED FILE: " + att.name + " (Excel/CSV) ===";
           }
         }
       }
+      console.log("Attachments processed — images for vision: " + inlineImages.length + ", docx: " + (originalDocxBuffer ? "yes" : "no"));
     } catch (err) {
       console.error("Attachment fetch error:", err.message);
     }
