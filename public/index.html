@@ -871,7 +871,7 @@ const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const ini=n=>n.split(" ").map(x=>x[0]).join("").slice(0,2);
 const getKey=()=>localStorage.getItem("j_key")||"";
 const ccol=n=>n.includes("Virgin")?"#b91c1c":n.includes("V/Line")?"#1d4ed8":n.includes("DEECA")?"#15803d":n.includes("Wayss")?"#7c3aed":n.includes("Scentregroup")?"#c2410c":"#374151";
-const sspill=s=>s==="Confirmed"?"background:#dcfce7;color:#15803d;":s.includes("Tentative")?"background:#dbeafe;color:#1e40af;":s==="Quote Pending"?"background:#fef9c3;color:#854d0e;":"background:#f1f5f9;color:#475569;";
+const sspill=s=>s==="Confirmed"?"background:#dcfce7;color:#15803d;":s==="Confirmed (was tentative)"?"background:#dcfce7;color:#15803d;":s.includes("Tentative")||s.includes("tentative")?"background:#dbeafe;color:#1e40af;":s==="Quote Pending"?"background:#fef9c3;color:#854d0e;":s.includes("Pending")?"background:#fef9c3;color:#854d0e;":"background:#f1f5f9;color:#475569;";
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 
@@ -881,6 +881,7 @@ function switchTab(id){
   document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===id));
   document.querySelectorAll(".tp").forEach(p=>p.classList.toggle("active",p.id==="tp-"+id));
   document.getElementById("topbar-title").textContent=TLABELS[id];
+  if(id==="bookings" && SERVER_MODE) loadBookingsFromServer(); // always fresh on tab open
 }
 document.querySelectorAll(".nav-btn").forEach(b=>b.addEventListener("click",()=>switchTab(b.dataset.tab)));
 
@@ -961,8 +962,6 @@ async function sendMsg(){
   const inp=document.getElementById("chat-input");
   const txt=inp.value.trim();
   if(!txt)return;
-  const key=getKey();
-  if(!key){openSettings();return;}
   addMsg("user",txt);
   chatHist.push({role:"user",content:txt});
   inp.value="";
@@ -970,18 +969,41 @@ async function sendMsg(){
   btn.disabled=true;
   showTyping();
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:16000,system:SYS,messages:chatHist})
-    });
-    const d=await res.json();
-    if(d.error)throw new Error(d.error.message);
-    const reply=d.content?.[0]?.text||"Sorry, I could not process that.";
+    let reply;
+    if(SERVER_MODE){
+      // Route through server — no API key needed in browser, prompt caching handled server-side
+      const windowedHist=chatHist.slice(-10); // sliding window: last 10 messages
+      const res=await fetch("/api/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({messages:windowedHist})
+      });
+      const d=await res.json();
+      if(d.error)throw new Error(d.error);
+      reply=d.message||"Sorry, I could not process that.";
+    } else {
+      // Standalone fallback — direct API with caching + sliding window
+      const key=getKey();
+      if(!key){openSettings();btn.disabled=false;rmTyping();return;}
+      const windowedHist=chatHist.slice(-10);
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true","anthropic-beta":"prompt-caching-2024-07-31"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:1500,
+          system:[{type:"text",text:SYS,cache_control:{type:"ephemeral"}}],
+          messages:windowedHist
+        })
+      });
+      const d=await res.json();
+      if(d.error)throw new Error(d.error.message);
+      reply=d.content?.[0]?.text||"Sorry, I could not process that.";
+    }
     chatHist.push({role:"assistant",content:reply});
     rmTyping();addMsg("assistant",reply);
   }catch(e){
-    rmTyping();addMsg("assistant","Error: "+(e.message||"Connection failed. Please check your API key in Settings."));
+    rmTyping();addMsg("assistant","Error: "+(e.message||"Connection failed."));
   }
   btn.disabled=false;
 }
@@ -1664,14 +1686,31 @@ async function processEmail(){
       msgContent=combined;
     }
     // ── Single API call ───────────────────────────────────────────────────
-    const res=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:8000,system:PROC_SYS,messages:[{role:"user",content:msgContent}]})
-    });
-    const d=await res.json();
-    if(d.error) throw new Error(d.error.message);
-    const text=d.content?.[0]?.text||"{}";
+    let text;
+    if(SERVER_MODE){
+      // Route through server: uses Haiku for extraction, Sonnet+caching for rules/JSON
+      const srvRes=await fetch("/api/process-email",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          content:typeof msgContent==="string"?msgContent:(msgContent.find?.(m=>m.type==="text")?.text||""),
+          images:[]
+        })
+      });
+      const srvD=await srvRes.json();
+      if(srvD.error)throw new Error(srvD.error);
+      text=JSON.stringify(srvD.result||{});
+    } else {
+      const key=getKey();if(!key){openSettings();return;}
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true","anthropic-beta":"prompt-caching-2024-07-31"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:5000,system:[{type:"text",text:PROC_SYS,cache_control:{type:"ephemeral"}}],messages:[{role:"user",content:msgContent}]})
+      });
+      const d=await res.json();
+      if(d.error) throw new Error(d.error.message);
+      text=d.content?.[0]?.text||"{}";
+    }
     let j;
     try{
       let clean=text.replace(/```json|```/g,"").trim();
@@ -2457,9 +2496,52 @@ async function checkM365Status() {
   }
 }
 
+
+// ── SYNC BOOKINGS FROM SERVER ──────────────────────────────────────────────
+// Fetches server-side bookingsLog (populated by email processing) and merges
+// into the local bookings array so the Bookings tab always reflects all bookings,
+// including those processed from inbound emails and tentative/pending ones.
+async function loadBookingsFromServer() {
+  if (!SERVER_MODE) return;
+  try {
+    const data = await apiCall("GET", "/api/bookings");
+    if (!data || !Array.isArray(data)) return;
+    // Server returns newest-first (already reversed in route).
+    // Map to the shape renderBookings() expects, flag as from_server to avoid dupes.
+    const serverBookings = data.map(b => ({
+      id:            b.id,
+      client:        b.client || "Unknown",
+      session:       b.session_type || "Unknown session",
+      date:          b.date || "TBC",
+      state:         b.state || "TBC",
+      venue:         b.venue || "",
+      participants:  b.participants || "",
+      trainers:      Array.isArray(b.trainers) ? b.trainers : ["TBC"],
+      session_start: b.session_start || "09:00",
+      session_end:   b.session_end || "",
+      status:        b.status || "Pending Approval",
+      fd:            b.full_day || false,
+      from_server:   true,
+      calendar_event_id:  b.calendar_event_id || null,
+      calendar_pre_booked: b.calendar_pre_booked || false
+    }));
+    // Keep any locally-added bookings (not from server) and prepend server ones
+    const localOnly = bookings.filter(b => !b.from_server);
+    // Deduplicate: if server has an entry with same id, prefer server version
+    const serverIds = new Set(serverBookings.map(b => b.id));
+    const mergedLocal = localOnly.filter(b => !serverIds.has(b.id));
+    bookings = [...serverBookings, ...mergedLocal];
+    renderBookings();
+  } catch(err) {
+    console.warn("Could not load bookings from server:", err.message);
+  }
+}
+
 function startQueuePolling() {
   if (SERVER_MODE) {
-    setInterval(loadQueueFromServer, 30000); // refresh queue every 30 seconds
+    setInterval(loadQueueFromServer, 30000);    // refresh queue every 30 seconds
+    setInterval(loadBookingsFromServer, 30000); // sync bookings tab every 30 seconds
+    loadBookingsFromServer();                   // immediate first load
   }
 }
 
