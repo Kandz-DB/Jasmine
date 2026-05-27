@@ -167,7 +167,7 @@ EMAIL SIGN-OFF: Kind Regards\nDiane Kruger\nCorporate Operations Lead\nRisk 2 So
 OUTPUT JSON:
 {
   "bookings": [{
-    "action_type": "booking OR deeca_quote OR conflict OR unknown",
+    "action_type": "booking OR deeca_quote OR cancellation OR rescheduling OR conflict OR unknown",
     "client": "", "session_type": "", "date": "REAL DATE never TBC",
     "state": "", "venue": "", "participants": 0,
     "trainers": [], "trainer_count": 0,
@@ -196,14 +196,49 @@ BUSINESS: Risk 2 Solution Group | training@risk2solution.com | 1300 459 970 | Br
 You know all the clients (Virgin Australia, V/Line, DEECA, Wayss, Scentregroup), all 16 trainers, all 9 session types and all booking rules. Be helpful, concise and professional. If asked to create a booking, trainer or session, guide the user through it conversationally.`;
 
 // ── TWO-STEP EMAIL PROCESSING ─────────────────────────────────────────────────
-async function processEmailWithJasmine(emailContent) {
-  // Step 1: Extract facts as plain text
-  const step1Res = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 3000,
-    messages: [{
-      role: "user",
-      content: `Extract ALL booking details from this email. Return a numbered list — one entry per session.
+
+// Check if we already sent an email in this conversation thread
+async function alreadyRepliedToThread(conversationId, token) {
+  if (!conversationId) return false;
+  try {
+    const sent = await graphRequest("GET",
+      "/users/" + TRAINING_MAILBOX + "/mailFolders/SentItems/messages?$filter=conversationId eq '" + conversationId + "'&$top=1&$select=id",
+      null, token);
+    return sent && sent.value && sent.value.length > 0;
+  } catch (err) {
+    return false; // If check fails, process anyway
+  }
+}
+
+async function processEmailWithJasmine(emailContent, images = []) {
+  // Step 1: Extract facts as plain text — include images if present (e.g. VA booking table)
+  let step1Content;
+  if (images && images.length > 0) {
+    // Multi-modal: include images so Claude can read booking tables from screenshots
+    step1Content = images.map(img => ({
+      type: "image",
+      source: { type: "base64", media_type: img.mediaType, data: img.base64 }
+    }));
+    step1Content.push({
+      type: "text",
+      text: `Extract ALL booking details from this email and the attached image(s). The image may contain a booking schedule table with dates, locations, course types and participant numbers. Return a numbered list — one entry per session row in the table.
+
+For each session include:
+CLIENT: (e.g. Virgin Australia)
+SESSION TYPE: (Recurrent FC/CC = Security Awareness Recurrent | Initial Cabin Crew = Security Awareness Initial | OVA = OVA Virgin Australia)
+DATE: (exact date from table — convert to readable e.g. 10 July 2026)
+START TIME: (from table e.g. 09:00)
+END TIME: (from table e.g. 14:00)
+LOCATION/STATE: (BNE=QLD, SYD=NSW, MEL=VIC, PER=WA, ADL=SA)
+PARTICIPANTS: (FC + CC combined — add both columns together)
+NOTES:
+
+Email context:
+---
+${emailContent.slice(0, 4000)}`
+    });
+  } else {
+    step1Content = `Extract ALL booking details from this email. Return a numbered list — one entry per session.
 
 For each session include:
 CLIENT: 
@@ -219,8 +254,13 @@ If DEECA form with multiple classes in section 2.2, list EACH class separately u
 
 Source material:
 ---
-${emailContent.slice(0, 20000)}`
-    }]
+${emailContent.slice(0, 20000)}`;
+  }
+
+  const step1Res = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 3000,
+    messages: [{ role: "user", content: step1Content }]
   });
 
   const extractedFacts = step1Res.content[0].text || "";
@@ -254,8 +294,25 @@ async function pollInbox() {
     if (!result || !result.value) { console.log("No emails found."); return; }
     console.log("Inbox has " + result.value.length + " email(s).");
 
+    // Filter out calendar invites, auto-replies, out-of-office, delivery reports
+    const shouldSkip = (email) => {
+      const subj = (email.subject || "").toLowerCase();
+      const ct = (email.contentType || "").toLowerCase();
+      if (ct.includes("calendar")) return true;
+      if (subj.startsWith("accepted:")) return true;
+      if (subj.startsWith("declined:")) return true;
+      if (subj.startsWith("tentative:")) return true;
+      if (subj.startsWith("cancelled:")) return false; // DO process cancellations
+      if (subj.startsWith("automatic reply:")) return true;
+      if (subj.startsWith("out of office:")) return true;
+      if (subj.includes("delivery failed")) return true;
+      if (subj.includes("undeliverable")) return true;
+      return false;
+    };
+
     const unprocessed = result.value.filter(email =>
-      !email.categories || !email.categories.includes("Jasmine Processed")
+      (!email.categories || !email.categories.includes("Jasmine Processed")) &&
+      !shouldSkip(email)
     );
     console.log("Unprocessed: " + unprocessed.length);
 
@@ -300,7 +357,22 @@ async function pollInbox() {
             summary: "Unrecognised sender — no action taken"
           });
         } else {
-          await processInboundEmail(email, clientName, token);
+          // Check if this is a reply to a thread we already handled
+          const alreadyHandled = await alreadyRepliedToThread(email.conversationId, token);
+          if (alreadyHandled) {
+            console.log("Reply to already-handled thread — tagging without reprocessing: " + email.subject);
+            emailLog.push({
+              id: Date.now(),
+              timestamp: new Date().toISOString(),
+              subject: email.subject,
+              from: senderEmail,
+              client: clientName,
+              status: "reply_to_handled",
+              summary: "Reply to an already-processed conversation — no new action required"
+            });
+          } else {
+            await processInboundEmail(email, clientName, token);
+          }
         }
 
         // Tag as processed
@@ -309,6 +381,7 @@ async function pollInbox() {
           { categories: [...(email.categories || []), "Jasmine Processed"] },
           token);
         console.log("Tagged: " + email.subject);
+        await new Promise(r => setTimeout(r, 500)); // Brief pause between emails
       } catch (err) {
         console.error("Error processing email:", email.subject, err.message);
       }
@@ -325,10 +398,11 @@ async function processInboundEmail(email, clientName, token) {
     ? email.body.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
     : email.bodyPreview || "";
 
-  // ── Fetch Word doc attachments (critical for DEECA) ────────────────────────
+  // ── Fetch attachments — Word docs, images (critical for VA inline tables) ────
   let attachmentText = "";
   let originalDocxBuffer = null;
   let originalDocxName = "";
+  const inlineImages = []; // { contentType, base64 } for Claude vision
 
   if (email.hasAttachments) {
     try {
@@ -339,12 +413,12 @@ async function processInboundEmail(email, clientName, token) {
       if (attachments && attachments.value) {
         for (const att of attachments.value) {
           const name = (att.name || "").toLowerCase();
+          const contentType = (att.contentType || "").toLowerCase();
+
           if (name.endsWith(".docx") || name.endsWith(".doc")) {
-            // Save the original binary for later document generation
             if (att.contentBytes) {
               originalDocxBuffer = Buffer.from(att.contentBytes, "base64");
               originalDocxName = att.name || "attachment.docx";
-              // Extract text using mammoth
               try {
                 const result = await mammoth.extractRawText({ buffer: originalDocxBuffer });
                 if (result.value) {
@@ -355,8 +429,15 @@ async function processInboundEmail(email, clientName, token) {
                 console.error("mammoth error:", err.message);
               }
             }
+          } else if (contentType.startsWith("image/") || name.match(/\.(png|jpg|jpeg|gif|bmp|webp)$/)) {
+            // Inline image — send to Claude vision
+            if (att.contentBytes) {
+              const mediaType = contentType.startsWith("image/") ? contentType.split(";")[0] : "image/png";
+              inlineImages.push({ mediaType, base64: att.contentBytes });
+              console.log("Found inline image: " + (att.name || "image") + " (" + mediaType + ")");
+            }
           } else if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
-            attachmentText += "\n\n=== ATTACHED FILE: " + att.name + " (Excel/CSV) ===";
+            attachmentText += "\n\n=== ATTACHED FILE: " + att.name + " (Excel/CSV — extract key data) ===";
           }
         }
       }
@@ -385,7 +466,7 @@ async function processInboundEmail(email, clientName, token) {
 
   let jasmineParsed, extractedFacts;
   try {
-    const result = await processEmailWithJasmine(emailContent);
+    const result = await processEmailWithJasmine(emailContent, inlineImages);
     jasmineParsed = result.jasmineParsed;
     extractedFacts = result.extractedFacts;
   } catch (err) {
@@ -408,6 +489,19 @@ async function processInboundEmail(email, clientName, token) {
 
   // Build queue entry from Jasmine's output
   const bookings = jasmineParsed.bookings || [];
+  // Determine overall action type and queue tag for Diane
+  const overallActionType = bookings.length > 0 ? bookings[0].action_type : (jasmineParsed.action_type || "unknown");
+  const bookingTagMap = {
+    "booking": { label: "Booking Request", color: "#1d4ed8", bg: "#dbeafe" },
+    "deeca_quote": { label: "DEECA Quote", color: "#15803d", bg: "#dcfce7" },
+    "cancellation": { label: "Cancellation", color: "#b91c1c", bg: "#fef2f2" },
+    "rescheduling": { label: "Rescheduling", color: "#d97706", bg: "#fef9c3" },
+    "conflict": { label: "Conflict", color: "#7c3aed", bg: "#f3e8ff" },
+    "unknown": { label: "Needs Review", color: "#64748b", bg: "#f1f5f9" },
+    "error": { label: "Error", color: "#b91c1c", bg: "#fef2f2" }
+  };
+  const bookingTag = bookingTagMap[overallActionType] || bookingTagMap["unknown"];
+
   const entry = {
     id: Date.now(),
     timestamp: new Date().toISOString(),
@@ -415,7 +509,8 @@ async function processInboundEmail(email, clientName, token) {
     subject: email.subject,
     from_email: email.from && email.from.emailAddress ? email.from.emailAddress.address : "",
     client: clientName,
-    action_type: bookings.length > 0 ? bookings[0].action_type : "unknown",
+    action_type: overallActionType,
+    booking_tag: bookingTag,
     bookings,
     client_email_to: jasmineParsed.client_email_to || "",
     client_email_subject: jasmineParsed.client_email_subject || "",
@@ -784,10 +879,10 @@ app.get("/api/email-log", requireAuth, (req, res) => {
 
 // ── MANUAL PROCESS EMAIL (from Process Email tab) ─────────────────────────────
 app.post("/api/process-email", requireAuth, async (req, res) => {
-  const { content } = req.body;
+  const { content, images } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: "No content provided" });
   try {
-    const { jasmineParsed, extractedFacts } = await processEmailWithJasmine(content);
+    const { jasmineParsed, extractedFacts } = await processEmailWithJasmine(content, images || []);
     res.json({ success: true, result: jasmineParsed, extracted_facts: extractedFacts });
   } catch (err) {
     res.status(500).json({ error: err.message });
