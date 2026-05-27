@@ -2310,7 +2310,7 @@ function renderQueue(items) {
   const el = document.getElementById("queue-list");
   if (!el) return;
   if (!items || items.length === 0) {
-    el.innerHTML = '<div class="proc-empty"><div style="font-size:40px;margin-bottom:12px;">✅</div><div style="font-weight:600;color:#0f172a;margin-bottom:6px;">All clear — nothing pending</div><div style="font-size:12px;color:#94a3b8;">Jasmine polls the inbox every 10 minutes. Click Check Inbox Now to check immediately.</div></div>';
+    el.innerHTML = '<div class="proc-empty"><div style="font-size:40px;margin-bottom:12px;">✅</div><div style="font-weight:600;color:#0f172a;margin-bottom:6px;">All clear — nothing pending</div><div style="font-size:12px;color:#94a3b8;">Jasmine polls the inbox every 5 minutes. Click Check Inbox Now to check immediately.</div></div>';
     return;
   }
   el.innerHTML = items.map(function(item) {
@@ -2458,7 +2458,7 @@ function dismissItem(id) {
 
 async function reprocessAll() {
   if (!SERVER_MODE) { alert("Requires server mode."); return; }
-  if (!confirm("Force reprocess recent emails?\n\nJasmine will skip any already in the review queue (deduplication), but may still trigger API calls for unqueued emails.\n\nUse for missed emails only — not routine testing.")) return;
+  if (!confirm("Force reprocess recent emails?\n\nAlready-queued emails will be skipped automatically. Only new or dismissed emails will use API credits.\n\nGood to go?")) return;
   const btn = document.querySelector("[onclick='reprocessAll()']");
   if (btn) { btn.disabled=true; btn.textContent="Reprocessing…"; }
   const res = await apiCall("POST", "/api/reprocess-all");
@@ -2490,7 +2490,7 @@ async function checkM365Status() {
   }
   const res = await apiCall("GET", "/api/m365-status");
   if (res && res.connected) {
-    document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#15803d;padding:8px 12px;background:#f0fdf4;border-radius:8px;margin-bottom:8px;">✓ Connected — watching ' + res.mailbox + ' · polling every 10 minutes</div>';
+    document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#15803d;padding:8px 12px;background:#f0fdf4;border-radius:8px;margin-bottom:8px;">✓ Connected — watching ' + res.mailbox + ' · polling every 5 minutes</div>';
   } else {
     document.getElementById("queue-m365-status").innerHTML = '<div style="font-size:12px;color:#b91c1c;padding:8px 12px;background:#fef2f2;border-radius:8px;margin-bottom:8px;">⚠ Not connected to Microsoft 365 — ' + (res&&res.reason?res.reason:"Azure credentials not configured") + '</div>';
   }
