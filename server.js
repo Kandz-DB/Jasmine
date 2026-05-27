@@ -555,14 +555,32 @@ ${emailContent.slice(0, 20000)}`;
   return { jasmineParsed: j, extractedFacts };
 }
 
-// ── INBOX POLLING ─────────────────────────────────────────────────────────────
+// ── BOOKING RELEVANCE PRE-SCAN ────────────────────────────────────────────────
+// Quick keyword check BEFORE calling Jasmine — costs zero API credits.
+// Returns true if the email looks like it could be a booking-related request.
+// Errs on the side of inclusion (false positives go to Jasmine; false negatives are silently skipped).
+const BOOKING_KEYWORDS = [
+  "booking", "book ", "session", "training", "course", "schedule", "scheduled",
+  "confirm", "cancel", "reschedule", "dates", "availability", "participants",
+  "attendees", "quote", "request for service", "ova", "security awareness",
+  "de-escalation", "deescalation", "conflict", "warden", "emergency management",
+  "initial", "recurrent", "fc ", "cc ", " fc\n", " cc\n", "cabin crew",
+  "flight crew", "personal safety", "authorised officer", "rp7", "rp8", "rp9"
+];
+
+function looksLikeBookingEmail(subject, bodyText) {
+  const haystack = ((subject || "") + " " + (bodyText || "")).toLowerCase();
+  return BOOKING_KEYWORDS.some(k => haystack.includes(k));
+}
+
+
 async function pollInbox() {
   if (!AZURE_CLIENT_ID) { console.log("Graph not configured — skipping poll."); return; }
   console.log("Jasmine polling inbox...");
   try {
     const token = await getGraphToken();
     const result = await graphRequest("GET",
-      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=20&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,webLink,conversationId",
+      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,webLink,conversationId,toRecipients,ccRecipients",
       null, token);
 
     if (!result || !result.value) { console.log("No emails found."); return; }
@@ -671,6 +689,25 @@ async function processInboundEmail(email, clientName, token) {
   const bodyText = email.body && email.body.content
     ? email.body.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
     : email.bodyPreview || "";
+
+  // ── Quick relevance check — skip before spending any API credits ─────────
+  // If the subject + body preview contain zero booking-related keywords AND
+  // the email has no attachments, it's almost certainly an operational thread
+  // (feedback replies, exam admin, internal FYIs etc.). Log and skip.
+  if (!email.hasAttachments && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
+    console.log("Pre-scan: no booking keywords found — skipping without API call: " + email.subject);
+    emailLog.push({
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
+      subject: email.subject,
+      from: email.from && email.from.emailAddress ? email.from.emailAddress.address : "",
+      client: clientName,
+      status: "skipped_not_booking",
+      summary: "Pre-scan: no booking keywords — skipped without API call"
+    });
+    persistSave();
+    return;
+  }
 
   // ── Fetch attachments — Word docs, images (critical for VA inline tables) ────
   let attachmentText = "";
@@ -815,8 +852,26 @@ async function processInboundEmail(email, clientName, token) {
 
   // Build queue entry from Jasmine's output
   const bookings = jasmineParsed.bookings || [];
-  // Determine overall action type and queue tag for Diane
+
+  // ── Auto-dismiss if Jasmine found nothing actionable ─────────────────────
+  // If action_type is unknown AND there are no bookings, this email isn't a
+  // booking request. Log it and skip adding to the review queue entirely.
   const overallActionType = bookings.length > 0 ? bookings[0].action_type : (jasmineParsed.action_type || "unknown");
+  if (overallActionType === "unknown" && bookings.length === 0) {
+    console.log("Jasmine: no actionable booking found — auto-dismissing: " + email.subject);
+    emailLog.push({
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
+      subject: email.subject,
+      from: email.from && email.from.emailAddress ? email.from.emailAddress.address : "",
+      client: clientName,
+      status: "auto_dismissed",
+      summary: "Jasmine found no booking content — auto-dismissed"
+    });
+    persistSave();
+    return;
+  }
+
   const bookingTagMap = {
     "booking": { label: "Booking Request", color: "#1d4ed8", bg: "#dbeafe" },
     "deeca_quote": { label: "DEECA Quote", color: "#15803d", bg: "#dcfce7" },
@@ -1219,7 +1274,7 @@ app.post("/api/reprocess-all", requireAuth, async (req, res) => {
   try {
     const token = await getGraphToken();
     const result = await graphRequest("GET",
-      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=20&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories",
+      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,toRecipients,ccRecipients",
       null, token);
     if (!result || !result.value) return res.json({ success: true, processed: 0 });
     let count = 0;
