@@ -519,19 +519,32 @@ ${emailContent.slice(0, 20000)}`;
   // Step 2: Apply Jasmine's rules and produce JSON
   const step2Res = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 8000,  // needs headroom for large VA batches with many sessions
+    max_tokens: 4000,  // 4000 covers most emails; truncation guard below catches large VA batches
     system: [{ type: "text", text: JASMINE_PROC_SYS, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: extractedFacts }]
   });
 
-  // Detect truncation before attempting to parse — a cut-off response produces
-  // broken JSON that crashes with a misleading "Unterminated string" error.
   if (step2Res.stop_reason === "max_tokens") {
-    throw new Error(
-      "Jasmine's JSON response was cut off (max_tokens reached). " +
-      "The email likely contains more sessions than usual. " +
-      "Try splitting the email or processing sessions in smaller batches."
-    );
+    // Retry once with 8000 tokens for large VA batch emails before giving up
+    console.warn("Step 2 hit max_tokens (4000) — retrying with 8000 for large batch...");
+    const retryRes = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 8000,
+      system: [{ type: "text", text: JASMINE_PROC_SYS, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: extractedFacts }]
+    });
+    if (retryRes.stop_reason === "max_tokens") {
+      throw new Error(
+        "Jasmine's JSON response was cut off even at 8000 tokens. " +
+        "The email likely contains more sessions than usual. " +
+        "Try splitting the email or processing sessions in smaller batches."
+      );
+    }
+    const retryText = retryRes.content[0].text || "{}";
+    let retryClean = retryText.replace(/```json|```/g, "").trim();
+    if (!retryClean.startsWith("{")) throw new Error("Jasmine returned text instead of JSON: " + retryClean.slice(0, 120));
+    const j = JSON.parse(retryClean);
+    return { jasmineParsed: j, extractedFacts };
   }
 
   const text = step2Res.content[0].text || "{}";
@@ -1223,6 +1236,11 @@ app.post("/api/reprocess-all", requireAuth, async (req, res) => {
         clientName = detectClientFromContent(subject) || detectClientFromContent(bodyText) || "Unknown — Internal Forward";
       }
       if (clientName) {
+        const alreadyQueued = reviewQueue.some(e => e.email_id === email.id);
+        if (alreadyQueued) {
+          console.log("Skipping reprocess — already in queue: " + email.subject);
+          continue;
+        }
         await processInboundEmail(email, clientName, token);
         count++;
       }
@@ -1260,8 +1278,8 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   const { messages } = req.body;
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 2000,
+      model: "claude-haiku-4-5-20251001",  // Haiku — chat is conversational Q&A, no need for Sonnet
+      max_tokens: 1500,
       system: [{ type: "text", text: JASMINE_CHAT_SYS, cache_control: { type: "ephemeral" } }],
       messages: messages.slice(-10)   // sliding window — last 10 messages only
     });
@@ -1426,8 +1444,8 @@ app.listen(PORT, () => {
   persistLoad(); // Restore reviewQueue, bookingsLog, emailLog from disk
   if (AZURE_CLIENT_ID) {
     pollInbox();
-    setInterval(pollInbox, 60 * 60 * 1000); // Poll every 60 minutes
-    console.log("Email polling started — every 60 minutes.");
+    setInterval(pollInbox, 5 * 60 * 1000); // Poll every 5 minutes — keeps system prompt cache warm (5-min TTL)
+    console.log("Email polling started — every 5 minutes.");
   } else {
     console.log("Azure not configured — email polling disabled. Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET to enable.");
   }
