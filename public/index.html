@@ -433,8 +433,16 @@ nav { flex: 1; padding: 10px 8px; }
           <div style="font-size:13px;color:#64748b;" id="queue-count-label">Loading queue…</div>
           <div style="display:flex;gap:8px;">
             <button class="add-btn" style="background:#475569;" onclick="pollNow()">🔄 Check Inbox Now</button>
-            <button class="add-btn" style="background:#92400e;" onclick="reprocessAll()" title="Force reprocess all recent emails, ignoring processed tags — use for testing">⚡ Force Reprocess</button>
+            <button class="add-btn" style="background:#92400e;" onclick="reprocessAll()" title="Force reprocess all recent emails — use for testing">⚡ Force Reprocess</button>
           </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;" id="queue-filters">
+          <button class="el-filter active" onclick="filterQueue('all',this)">All</button>
+          <button class="el-filter" onclick="filterQueue('booking',this)" style="border-color:#1d4ed8;color:#1d4ed8;">Booking Requests</button>
+          <button class="el-filter" onclick="filterQueue('deeca_quote',this)" style="border-color:#15803d;color:#15803d;">DEECA Quotes</button>
+          <button class="el-filter" onclick="filterQueue('cancellation',this)" style="border-color:#b91c1c;color:#b91c1c;">Cancellations</button>
+          <button class="el-filter" onclick="filterQueue('rescheduling',this)" style="border-color:#d97706;color:#d97706;">Rescheduling</button>
+          <button class="el-filter" onclick="filterQueue('unknown',this)">Needs Review</button>
         </div>
         <div id="queue-m365-status" style="margin-bottom:12px;"></div>
         <div id="queue-list"></div>
@@ -2252,6 +2260,13 @@ function updateQueueBadge(count) {
   else { badge.style.display = "none"; }
 }
 
+function filterQueue(type, btn) {
+  document.querySelectorAll('#queue-filters .el-filter').forEach(b => b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  if(type === 'all') { renderQueue(queueData); return; }
+  renderQueue(queueData.filter(function(i){ return i.action_type === type; }));
+}
+
 function renderQueue(items) {
   const el = document.getElementById("queue-list");
   if (!el) return;
@@ -2267,9 +2282,9 @@ function renderQueue(items) {
     const bks = item.bookings || [];
     const mainBk = bks[0] || {};
     return `<div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;margin-bottom:12px;cursor:pointer;transition:border-color .15s;" onclick="openQueueItem(${item.id})" onmouseover="this.style.borderColor='#94a3b8'" onmouseout="this.style.borderColor='#e2e8f0'">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
         <span style="background:${cc}22;color:${cc};font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;">${client}</span>
-        ${isDeeca?'<span style="background:#f0fdf4;color:#15803d;font-size:11px;font-weight:600;padding:3px 10px;border-radius:10px;">QUOTE</span>':""}
+        ${item.booking_tag ? `<span style="background:${item.booking_tag.bg};color:${item.booking_tag.color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;border:1px solid ${item.booking_tag.color}33;">${item.booking_tag.label}</span>` : ""}
         <span style="margin-left:auto;font-size:11px;color:#94a3b8;">${new Date(item.timestamp).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
       </div>
       <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">${esc(item.subject||"")}</div>
@@ -2290,7 +2305,10 @@ function openQueueItem(id) {
 
   document.getElementById("bk-detail-content").innerHTML = `
     <div class="bk-detail-title">${esc(item.subject||"")}</div>
-    <div class="bk-detail-sub">From: ${esc(item.from_email||"")} · ${new Date(item.timestamp).toLocaleString("en-AU")}</div>
+    <div class="bk-detail-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span>From: ${esc(item.from_email||"")} · ${new Date(item.timestamp).toLocaleString("en-AU")}</span>
+      ${item.booking_tag ? `<span style="background:${item.booking_tag.bg};color:${item.booking_tag.color};font-size:11px;font-weight:700;padding:2px 10px;border-radius:8px;border:1px solid ${item.booking_tag.color}33;">${item.booking_tag.label}</span>` : ""}
+    </div>
     <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#14532d;line-height:1.7;">${esc(item.diane_summary||"")}</div>
     ${item.overall_flags&&item.overall_flags.length?`<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#713f12;">⚠ ${item.overall_flags.join(" · ")}</div>`:""}
     <div class="bk-detail-grid">
