@@ -913,56 +913,84 @@ async function processInboundEmail(email, clientName, token) {
         { client: clientName }, jasmineParsed, token
       );
       if (calResults.conflicts.length > 0) {
-        console.log("Calendar conflicts found:", calResults.conflicts.length, "slots — fetching alternatives.");
+        console.log("Calendar conflicts found:", calResults.conflicts.length, "slots — fetching alternatives for all.");
 
-        // For each conflicted booking, look up alternative dates and rewrite the
-        // client email so it clearly states unavailability and offers alternatives.
+        // ── Step 1: Gather alternatives for every conflicted date in parallel ─
+        const conflictedDates = [];   // { date, session_type, trainerMsg, alts[] }
         for (const conflict of calResults.conflicts) {
           const conflictBk = jasmineParsed.bookings.find(
             bk => bk.date === conflict.date && bk.session_type === conflict.session_type
           );
           const trainerNames = (conflictBk && conflictBk.trainers) || [];
-          const availDates = await getTrainerAvailableDates(trainerNames, token);
+          const availDates   = await getTrainerAvailableDates(trainerNames, token);
           if (conflictBk) conflictBk.available_alternatives = availDates;
+          const trainerMsg   = (conflict.trainerConflicts || []).map(tc => tc.trainer + " already booked").join(", ");
+          conflictedDates.push({
+            date: conflict.date,
+            session_type: conflict.session_type,
+            trainerMsg,
+            alts: availDates
+          });
+        }
 
-          // Rewrite the client email to reflect the conflict and propose alternatives
-          if (jasmineParsed.client_email_body) {
-            try {
-              const altLine = availDates.length > 0
-                ? "The following dates are currently available: " + availDates.join(", ") + "."
-                : "Please contact us to arrange a suitable alternative date.";
-              const rewriteRes = await client.messages.create({
-                model: "claude-haiku-4-5-20251001",
-                max_tokens: 600,
-                messages: [{ role: "user", content:
-                  "Rewrite the body of this client email. The date " + conflict.date +
-                  " for " + conflict.session_type + " is NOT available due to a trainer scheduling conflict. " +
-                  "State this clearly and apologetically, then say: \"" + altLine + "\" " +
-                  "Ask them to reply confirming which alternative date suits. Keep the same sign-off and professional tone. " +
-                  "Return ONLY the rewritten email body, no preamble.\n\nOriginal email:\n" +
-                  jasmineParsed.client_email_body
-                }]
-              });
-              jasmineParsed.client_email_body = rewriteRes.content[0].text || jasmineParsed.client_email_body;
-              console.log("Conflict client email rewritten — alternatives offered:", availDates.length);
-            } catch (err) {
-              console.error("Conflict email rewrite error:", err.message);
-            }
+        // ── Step 2: Identify confirmed (available) dates ──────────────────────
+        const confirmedDates = jasmineParsed.bookings
+          .filter(bk => !calResults.conflicts.some(c => c.date === bk.date && c.session_type === bk.session_type))
+          .map(bk => bk.date + " (" + bk.session_type + ")")
+          .filter(Boolean);
+
+        // ── Step 3: ONE Haiku call rewrites the client email with full context ─
+        // This produces a single coherent email covering all confirmed dates AND
+        // all unavailable dates with alternatives — not a series of partial rewrites.
+        if (jasmineParsed.client_email_body) {
+          try {
+            const confirmedSection = confirmedDates.length > 0
+              ? "CONFIRMED dates (proceed as planned): " + confirmedDates.join(", ")
+              : "No dates were confirmed.";
+
+            const conflictSection = conflictedDates.map(c => {
+              const altStr = c.alts.length > 0
+                ? "Available alternatives: " + c.alts.slice(0, 5).join(", ")
+                : "Please contact us to arrange an alternative.";
+              return "UNAVAILABLE: " + c.date + " (" + c.session_type + ")" +
+                (c.trainerMsg ? " — " + c.trainerMsg : "") + ". " + altStr;
+            }).join("\n");
+
+            const rewriteRes = await client.messages.create({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 800,
+              messages: [{ role: "user", content:
+                "Rewrite this client email as a single, coherent reply that covers ALL of the following in one email:\n\n" +
+                confirmedSection + "\n\n" + conflictSection + "\n\n" +
+                "Instructions:\n" +
+                "- Open by confirming the dates that ARE proceeding as planned (if any).\n" +
+                "- Then address each unavailable date: apologise, state it is unavailable, and list the specific alternative dates provided.\n" +
+                "- Ask the client to reply confirming which alternative date suits for each unavailable slot.\n" +
+                "- Keep it professional, warm and concise. Use the same sign-off as the original.\n" +
+                "- Do NOT invent dates or details not provided above.\n" +
+                "- Return ONLY the rewritten email body, no preamble.\n\n" +
+                "Original email (for tone/sign-off reference only):\n" +
+                jasmineParsed.client_email_body
+              }]
+            });
+            jasmineParsed.client_email_body = rewriteRes.content[0].text || jasmineParsed.client_email_body;
+            console.log("Client email rewritten — confirmed:", confirmedDates.length, "| conflicts:", conflictedDates.length);
+          } catch (err) {
+            console.error("Conflict email rewrite error:", err.message);
           }
         }
 
-        const conflictNote = "\n\n⚠ CALENDAR CONFLICTS — dates unavailable, client email updated with alternatives:\n" +
-          calResults.conflicts.map(c => {
-            const conflictBk = jasmineParsed.bookings.find(bk => bk.date === c.date && bk.session_type === c.session_type);
-            const alts = (conflictBk && conflictBk.available_alternatives) || [];
-            const trainerMsg = (c.trainerConflicts || []).map(tc => tc.trainer + " already booked").join(", ");
-            return "• " + c.session_type + " on " + c.date +
-              (trainerMsg ? " — " + trainerMsg : "") +
-              (alts.length ? "\n  Alternatives offered: " + alts.slice(0, 3).join(" | ") : "");
-          }).join("\n") +
-          "\n\nClient draft has been updated — please review before sending.";
+        // ── Step 4: Update Diane's summary with full picture ──────────────────
+        const conflictNote = "\n\n⚠ MIXED RESULT — " + confirmedDates.length + " date(s) confirmed, " +
+          conflictedDates.length + " unavailable:\n" +
+          (confirmedDates.length ? "✓ Confirmed: " + confirmedDates.join(", ") + "\n" : "") +
+          conflictedDates.map(c =>
+            "✗ Unavailable: " + c.session_type + " on " + c.date +
+            (c.trainerMsg ? " (" + c.trainerMsg + ")" : "") +
+            (c.alts.length ? "\n  Alternatives in draft: " + c.alts.slice(0, 3).join(" | ") : "")
+          ).join("\n") +
+          "\n\nClient draft updated — covers confirmed and unavailable dates in one email. Please review before sending.";
         jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + conflictNote;
-        // Mark overall entry as needing conflict resolution
         jasmineParsed.has_conflicts = true;
       }
     }
