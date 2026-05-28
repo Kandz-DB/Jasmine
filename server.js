@@ -254,6 +254,52 @@ async function checkCalendarSlot(startDT, endDT, token, trainerNames = []) {
   }
 }
 
+// ── TRAINER AVAILABILITY — find open weekdays in next N days ─────────────────
+// Used to suggest alternative dates in conflict client emails.
+// Returns up to 5 human-readable weekday dates where the named trainers are free.
+async function getTrainerAvailableDates(trainerNames, token, daysAhead = 35) {
+  try {
+    const t = token || await getGraphToken();
+    const fromDT = new Date().toISOString().slice(0, 19);
+    const toDT   = new Date(Date.now() + daysAhead * 86400000).toISOString().slice(0, 19);
+    const result = await graphRequest("GET",
+      "/users/" + TRAINING_MAILBOX + "/calendarView" +
+      "?startDateTime=" + encodeURIComponent(fromDT) +
+      "&endDateTime=" + encodeURIComponent(toDT) +
+      "&$select=subject,start,showAs&$top=200",
+      null, t
+    );
+    const events = (result && result.value) || [];
+    // Collect dates that already have a trainer-specific booking
+    const busyDates = new Set();
+    for (const ev of events) {
+      if (ev.showAs === "busy" || ev.showAs === "tentative" || ev.showAs === "oof") {
+        const dateStr = (ev.start.dateTime || ev.start.date || "").slice(0, 10);
+        if (trainerNames.some(n => n && (ev.subject || "").toLowerCase().includes(n.toLowerCase()))) {
+          busyDates.add(dateStr);
+        }
+      }
+    }
+    // Walk forward day-by-day and collect free weekdays
+    const available = [];
+    for (let i = 1; i <= daysAhead && available.length < 5; i++) {
+      const day  = new Date(Date.now() + i * 86400000);
+      const dow  = day.getUTCDay();
+      if (dow === 0 || dow === 6) continue;  // skip weekends
+      const dateStr = day.toISOString().slice(0, 10);
+      if (!busyDates.has(dateStr)) {
+        available.push(day.toLocaleDateString("en-AU", {
+          weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Australia/Brisbane"
+        }));
+      }
+    }
+    return available;
+  } catch (err) {
+    console.error("getTrainerAvailableDates error:", err.message);
+    return [];
+  }
+}
+
 // ── CALENDAR PRE-BOOKING ──────────────────────────────────────────────────────
 // After Jasmine parses an email:
 // 1. Checks the training calendar for each booking slot
@@ -316,6 +362,12 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
 
     const isFullDay = bk.full_day || false;
 
+    // For all-day events (DEECA full_day=true) Graph API requires dateTime+timeZone at midnight.
+    // The { date, timeZone } combo is invalid and causes a silent 400 — events never appear.
+    const tentFullDayEnd = (() => {
+      const [y, m, d] = startDT.slice(0, 10).split("-").map(Number);
+      return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10) + "T00:00:00";
+    })();
     const tentativeEvent = {
       subject: (bk.calendar_title || (entry.client + " — " + bk.session_type)) + " [Tentative]",
       body: {
@@ -331,10 +383,10 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
           "<p><em>Slot held by Jasmine — no invites sent yet. Diane must approve before trainers are notified.</em></p>"
       },
       start: isFullDay
-        ? { date: new Date(bk.date).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
+        ? { dateTime: startDT.slice(0, 10) + "T00:00:00", timeZone: "Australia/Brisbane" }
         : { dateTime: startDT, timeZone: "Australia/Brisbane" },
       end: isFullDay
-        ? { date: new Date(new Date(bk.date).getTime() + 86400000).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
+        ? { dateTime: tentFullDayEnd, timeZone: "Australia/Brisbane" }
         : { dateTime: endDT, timeZone: "Australia/Brisbane" },
       isAllDay: isFullDay,
       showAs: "tentative",
@@ -852,24 +904,66 @@ async function processInboundEmail(email, clientName, token) {
     jasmineParsed = result.jasmineParsed;
     extractedFacts = result.extractedFacts;
 
-    // ── Calendar availability check (read-only) ─────────────────────────────
-    // Check the training calendar for conflicts and same-day trainer clashes.
-    // Results are stored on the booking objects and surfaced in the review queue
-    // so Diane can see availability before confirming.
-    // NO calendar events are created here — that only happens on Diane's approval.
+    // ── Calendar availability + tentative pre-booking ──────────────────────────
+    // checkCalendarAvailability checks for slot/trainer conflicts and, if clear,
+    // immediately creates a TENTATIVE calendar event to hold the slot.
+    // Conflicted slots are skipped — no tentative event, just flags for Diane.
     if (token && jasmineParsed.bookings && jasmineParsed.bookings.length > 0) {
       const calResults = await checkCalendarAvailability(
         { client: clientName }, jasmineParsed, token
       );
       if (calResults.conflicts.length > 0) {
-        console.log("Calendar conflicts found:", calResults.conflicts.length, "slots.");
-        const conflictNote = "\n\n⚠ CALENDAR CONFLICTS DETECTED: " +
+        console.log("Calendar conflicts found:", calResults.conflicts.length, "slots — fetching alternatives.");
+
+        // For each conflicted booking, look up alternative dates and rewrite the
+        // client email so it clearly states unavailability and offers alternatives.
+        for (const conflict of calResults.conflicts) {
+          const conflictBk = jasmineParsed.bookings.find(
+            bk => bk.date === conflict.date && bk.session_type === conflict.session_type
+          );
+          const trainerNames = (conflictBk && conflictBk.trainers) || [];
+          const availDates = await getTrainerAvailableDates(trainerNames, token);
+          if (conflictBk) conflictBk.available_alternatives = availDates;
+
+          // Rewrite the client email to reflect the conflict and propose alternatives
+          if (jasmineParsed.client_email_body) {
+            try {
+              const altLine = availDates.length > 0
+                ? "The following dates are currently available: " + availDates.join(", ") + "."
+                : "Please contact us to arrange a suitable alternative date.";
+              const rewriteRes = await client.messages.create({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 600,
+                messages: [{ role: "user", content:
+                  "Rewrite the body of this client email. The date " + conflict.date +
+                  " for " + conflict.session_type + " is NOT available due to a trainer scheduling conflict. " +
+                  "State this clearly and apologetically, then say: \"" + altLine + "\" " +
+                  "Ask them to reply confirming which alternative date suits. Keep the same sign-off and professional tone. " +
+                  "Return ONLY the rewritten email body, no preamble.\n\nOriginal email:\n" +
+                  jasmineParsed.client_email_body
+                }]
+              });
+              jasmineParsed.client_email_body = rewriteRes.content[0].text || jasmineParsed.client_email_body;
+              console.log("Conflict client email rewritten — alternatives offered:", availDates.length);
+            } catch (err) {
+              console.error("Conflict email rewrite error:", err.message);
+            }
+          }
+        }
+
+        const conflictNote = "\n\n⚠ CALENDAR CONFLICTS — dates unavailable, client email updated with alternatives:\n" +
           calResults.conflicts.map(c => {
-            const trainerMsg = (c.trainerConflicts || []).map(tc => tc.trainer + " already booked that day").join(", ");
-            return c.session_type + " on " + c.date + (trainerMsg ? " (" + trainerMsg + ")" : "");
-          }).join(", ") +
-          " — please resolve before confirming.";
+            const conflictBk = jasmineParsed.bookings.find(bk => bk.date === c.date && bk.session_type === c.session_type);
+            const alts = (conflictBk && conflictBk.available_alternatives) || [];
+            const trainerMsg = (c.trainerConflicts || []).map(tc => tc.trainer + " already booked").join(", ");
+            return "• " + c.session_type + " on " + c.date +
+              (trainerMsg ? " — " + trainerMsg : "") +
+              (alts.length ? "\n  Alternatives offered: " + alts.slice(0, 3).join(" | ") : "");
+          }).join("\n") +
+          "\n\nClient draft has been updated — please review before sending.";
         jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + conflictNote;
+        // Mark overall entry as needing conflict resolution
+        jasmineParsed.has_conflicts = true;
       }
     }
   } catch (err) {
@@ -922,6 +1016,52 @@ async function processInboundEmail(email, clientName, token) {
     "unknown": { label: "Needs Review", color: "#64748b", bg: "#f1f5f9" },
     "error": { label: "Error", color: "#b91c1c", bg: "#fef2f2" }
   };
+
+  // ── Rescheduling deduplication ──────────────────────────────────────────────
+  // When a client replies with a new date, Jasmine returns action_type=rescheduling.
+  // Find the original pending/approved booking for the same client+session_type
+  // and cancel its tentative calendar event so no duplicate appears in Outlook.
+  if (overallActionType === "rescheduling") {
+    try {
+      const t = token || await getGraphToken();
+      for (const bk of bookings) {
+        // Find the most recent queue entry for the same client + session type
+        const priorEntry = [...reviewQueue]
+          .reverse()
+          .find(e =>
+            e.client === clientName &&
+            e.id !== undefined &&
+            (e.status === "pending" || e.status === "approved") &&
+            (e.bookings || []).some(pb => pb.session_type === bk.session_type)
+          );
+        if (priorEntry) {
+          for (const priorBk of (priorEntry.bookings || [])) {
+            if (priorBk.session_type === bk.session_type && priorBk.calendar_event_id && priorBk.calendar_pre_booked) {
+              // Delete the old tentative calendar event — new date will be pre-booked fresh
+              try {
+                await graphRequest("DELETE",
+                  "/users/" + TRAINING_MAILBOX + "/calendar/events/" + priorBk.calendar_event_id,
+                  null, t);
+                console.log("Rescheduling: deleted old tentative event for", bk.session_type, "on", priorBk.date);
+                priorBk.calendar_event_id = null;
+                priorBk.calendar_pre_booked = false;
+              } catch (delErr) {
+                console.error("Rescheduling: calendar delete error:", delErr.message);
+              }
+            }
+          }
+          // Mark the prior entry as superseded so it doesn't clutter the queue
+          if (priorEntry.status === "pending") {
+            priorEntry.status = "superseded_by_reschedule";
+            console.log("Rescheduling: prior queue entry", priorEntry.id, "marked superseded.");
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Rescheduling dedup error:", err.message);
+    }
+  }
+
   const bookingTag = bookingTagMap[overallActionType] || bookingTagMap["unknown"];
 
   const entry = {
@@ -998,8 +1138,12 @@ async function approveQueueEntry(entry) {
       continue;
     }
 
+    // Resolve booking type flags up-front — used in both the pre-booked upgrade
+    // path AND the new-event creation path below (previously isDeeca was declared
+    // only after the upgrade block, causing a temporal dead zone ReferenceError).
+    const isDeeca = bk.action_type === "deeca_quote";
+
     // If this slot was pre-booked as tentative during processing, upgrade to confirmed
-    // If this slot was tentatively pre-booked during processing, upgrade it now.
     // PATCH adds attendees → Outlook fires the meeting-request invite to trainers.
     if (bk.calendar_event_id && bk.calendar_pre_booked) {
       try {
@@ -1063,8 +1207,13 @@ async function approveQueueEntry(entry) {
       continue;
     }
 
-    const isDeeca = bk.action_type === "deeca_quote";
     const isFullDay = bk.full_day || false;
+    // For all-day events (e.g. DEECA) the Graph API requires dateTime+timeZone at midnight.
+    // Using { date: "...", timeZone: "..." } is invalid and causes a silent 400 error.
+    const fullDayEndStr = (() => {
+      const [y, m, d] = startDT.slice(0, 10).split("-").map(Number);
+      return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10) + "T00:00:00";
+    })();
 
     // Attendees — trainer emails routed through safeEmail() for TEST_MODE support
     const trainerAttendees = [];
@@ -1089,10 +1238,10 @@ async function approveQueueEntry(entry) {
           "<p><em>Booked by Jasmine — Risk 2 Solution Group</em></p>"
       },
       start: isFullDay
-        ? { date: new Date(datePart).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
+        ? { dateTime: startDT.slice(0, 10) + "T00:00:00", timeZone: "Australia/Brisbane" }
         : { dateTime: startDT, timeZone: "Australia/Brisbane" },
       end: isFullDay
-        ? { date: new Date(new Date(datePart).getTime() + 86400000).toISOString().split("T")[0], timeZone: "Australia/Brisbane" }
+        ? { dateTime: fullDayEndStr, timeZone: "Australia/Brisbane" }
         : { dateTime: endDT, timeZone: "Australia/Brisbane" },
       isAllDay: isFullDay,
       showAs: isDeeca ? "tentative" : "busy",
