@@ -341,6 +341,51 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
   const bookings = jasmineParsed.bookings || [];
 
   for (const bk of bookings) {
+
+    // ── DEECA preferred date resolution ──────────────────────────────────────
+    // For single-session DEECA with multiple date options, Jasmine sets
+    // preferred_dates: ["8 June 2026", "17 June 2026", "26 June 2026"].
+    // Iterate through each date and use the first one Ross/trainer is available.
+    if ((bk.action_type === "deeca_quote" || bk.full_day) &&
+        bk.preferred_dates && bk.preferred_dates.length > 0) {
+      let resolved = false;
+      const token2 = token || await getGraphToken();
+      for (const pd of bk.preferred_dates) {
+        try {
+          const d = new Date(pd + " " + (bk.session_start || "09:30"));
+          const e = new Date(pd + " " + (bk.session_end  || "13:00"));
+          if (isNaN(d.getTime())) { console.warn("Could not parse preferred date:", pd); continue; }
+          const testStart = d.toISOString().slice(0, 19);
+          const testEnd   = e.toISOString().slice(0, 19);
+          const testCheck = await checkCalendarSlot(testStart, testEnd, token2, bk.trainers || []);
+          if (testCheck.available) {
+            bk.date = pd;
+            resolved = true;
+            console.log("DEECA preferred date resolved to:", pd, "(" + bk.preferred_dates.length + " options checked)");
+            break;
+          } else {
+            console.log("DEECA preferred date", pd, "— not available, trying next");
+          }
+        } catch (err) {
+          console.error("Preferred date check error for", pd, ":", err.message);
+        }
+      }
+      if (!resolved) {
+        // Every preferred date is conflicted — flag all, let the conflict email rewriter handle it
+        bk.date = bk.preferred_dates[0];
+        bk.calendar_conflict = true;
+        bk.flags = [...(bk.flags || []),
+          "⚠ All preferred dates conflicted: " + bk.preferred_dates.join(", ")];
+        results.conflicts.push({
+          session_type: bk.session_type,
+          date: bk.preferred_dates.join(" / "),
+          conflicts: [], trainerConflicts: []
+        });
+        console.log("DEECA: all preferred dates conflicted for", bk.session_type);
+        continue;
+      }
+    }
+
     if (!bk.date || bk.date.toLowerCase() === "tbc") {
       console.log("Skipping calendar check — date is TBC for:", bk.session_type);
       continue;
@@ -525,7 +570,8 @@ DEECA EMAIL RULES:
 - When a date is unavailable: say "the [date] session is unavailable" — do NOT give the reason (e.g. do not mention trainer name or "prior commitment").
 - Do NOT mention alternative/alternate dates in the confirmation email — just confirm the single date that has been tentatively booked. Alternative dates are only mentioned when a requested date is unavailable.
 - Closing for DEECA emails: "Once you confirm your preferred date, we will tentatively book it in and send you a quote for review."
-- DEECA SINGLE-SESSION REQUEST (3 date options): The client wants ONE session. Check which dates Ross/trainer is available. Tentatively book the FIRST available date. In the client email, confirm only that date as tentatively booked.
+- DEECA SINGLE-SESSION REQUEST (multiple date options): The client wants ONE session. Set "date" to the FIRST listed preferred date (never TBC). Set "preferred_dates" to ALL listed date options. The calendar check will find the first available date automatically. In the client email, confirm the booked date — the system handles which date gets booked.
+- FORBIDDEN: Never set date to "TBC" when the client has listed preferred dates. Always put the first listed date in "date" and all dates in "preferred_dates".
 
 DEECA QUOTE ACCEPTANCE: If the client email is accepting/approving a quote previously sent, use action_type="deeca_quote_acceptance". Set diane_summary to flag that the client has accepted the quote and is ready to confirm. Do not create new calendar events — Diane will approve and trigger the calendar invite.
 
@@ -543,7 +589,8 @@ OUTPUT JSON:
 {
   "bookings": [{
     "action_type": "booking OR confirmation_check OR deeca_quote OR cancellation OR rescheduling OR conflict OR unknown",
-    "client": "", "session_type": "", "date": "REAL DATE never TBC",
+    "client": "", "session_type": "", "date": "FIRST preferred date — NEVER write TBC when dates are provided",
+    "preferred_dates": ["list ALL date options here when client gave multiple choices for one session — e.g. ['8 June 2026','17 June 2026','26 June 2026']"],
     "state": "", "venue": "", "participants": 0,
     "trainers": [], "trainer_count": 0,
     "session_start": "09:00", "session_end": "13:00",
@@ -633,9 +680,14 @@ DEECA DATE RULES — READ CAREFULLY:
 - NEVER create multiple bookings from a single-session request just because multiple dates are listed.
 - The FROM email address is the contact's direct email — always include it.
 
+DEECA PARTICIPANT COUNT — READ CAREFULLY:
+- The form contains a participant table with numbered rows (1, 2, 3 … 15). Count the rows that have a participant NAME filled in — that is the participant count.
+- Do NOT say "participants not provided" if there is a participant table in the attachment — count the filled rows.
+- Report PARTICIPANTS as a number (e.g. 9) not as "TBC" or "not provided".
+
 Source material:
 ---
-${emailContent.slice(0, 6000)}`;
+${emailContent.slice(0, 10000)}`;
   }
 
   const step1Res = await client.messages.create({
@@ -1028,6 +1080,18 @@ async function processInboundEmail(email, clientName, token) {
       const calResults = await checkCalendarAvailability(
         { client: clientName }, jasmineParsed, token
       );
+
+      // Sync CLASS_DATES in the quote fields to the actual resolved booking date.
+      // Jasmine may write the full preferred-dates list before knowing which date
+      // was available — replace it with the single confirmed date after resolution.
+      for (const bk of (jasmineParsed.bookings || [])) {
+        if ((bk.action_type === "deeca_quote" || bk.full_day) &&
+            bk.date && bk.date.toLowerCase() !== "tbc" &&
+            jasmineParsed.quote_section5_fields) {
+          jasmineParsed.quote_section5_fields.CLASS_DATES = bk.date;
+        }
+      }
+
       if (calResults.conflicts.length > 0) {
         console.log("Calendar conflicts found:", calResults.conflicts.length, "slots — fetching alternatives for all.");
 
@@ -1943,10 +2007,20 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
       5: { 1: formattedDates || fields.CLASS_DATES || "" },
       6: { 1: "Start time: " + (fields.START_TIME || "09:00"), 2: "Finish time: " + (fields.FINISH_TIME || "13:00") },
       10: { 1: fields.CLASS_COST_EX || "$0.00", 2: fields.CLASS_COST_INC || "$0.00" },
-      11: { 1: fields.MATERIALS_EX || "$0.00", 2: fields.MATERIALS_INC || "$0.00" },
+      11: { 1: "$0.00", 2: "$0.00" },  // Materials: NEVER charged for DEECA — hardcoded
       13: { 2: fields.TRAVEL_KM || "$0.00" },
       14: { 2: fields.ACCOM_MEALS || "$0.00" },
-      15: { 1: fields.TOTAL_EX || "$0.00", 2: fields.TOTAL_INC || "$0.00" }
+      15: { 1: (() => {
+        // Recalculate total excluding materials (always $0 for DEECA)
+        const parseAmt = s => parseFloat((s || "0").replace(/[^0-9.-]/g,"")) || 0;
+        const exTotal = parseAmt(fields.CLASS_COST_EX) + parseAmt(fields.TRAVEL_KM) + parseAmt(fields.ACCOM_MEALS);
+        const incTotal = parseAmt(fields.CLASS_COST_INC) + parseAmt(fields.TRAVEL_KM) + parseAmt(fields.ACCOM_MEALS);
+        return exTotal > 0 ? "$" + exTotal.toFixed(2) : fields.TOTAL_EX || "$0.00";
+      })(), 2: (() => {
+        const parseAmt = s => parseFloat((s || "0").replace(/[^0-9.-]/g,"")) || 0;
+        const incTotal = parseAmt(fields.CLASS_COST_INC) + parseAmt(fields.TRAVEL_KM) + parseAmt(fields.ACCOM_MEALS);
+        return incTotal > 0 ? "$" + incTotal.toFixed(2) : fields.TOTAL_INC || "$0.00";
+      })() }
     };
 
     // Apply fills row by row
