@@ -882,18 +882,20 @@ async function pollInbox() {
             summary: "Unrecognised sender — no action taken"
           });
         } else {
-            // Hard dedup — prevents double-processing if poll fires twice rapidly
-            // or if Outlook's category filter hasn't propagated yet.
+            // Hard dedup — prevents double-processing within a single poll cycle.
+            // processingEmailIds is cleared after every poll so it doesn't block
+            // deliberate reprocessing (user removes "Jasmine Processed" category).
             if (processingEmailIds.has(email.id)) {
-              console.log("Already processing this email ID — skipping duplicate:", email.subject);
+              console.log("Already processing this email ID in current poll cycle — skipping:", email.subject);
               continue;
             }
-            if (reviewQueue.some(e => e.email_id === email.id)) {
-              console.log("Email already in review queue — skipping:", email.subject);
-              continue;
-            }
-            if (emailLog.some(e => e.email_id === email.id)) {
-              console.log("Email already in email log — skipping:", email.subject);
+            // Only block if there is a PENDING queue entry for this email.
+            // Dismissed, approved or superseded entries allow reprocessing.
+            const pendingEntry = reviewQueue.find(
+              e => e.email_id === email.id && e.status === "pending"
+            );
+            if (pendingEntry) {
+              console.log("Email already has a pending queue entry — skipping:", email.subject);
               continue;
             }
             processingEmailIds.add(email.id);
@@ -918,6 +920,13 @@ async function pollInbox() {
     }
   } catch (err) {
     console.error("Poll error:", err.message);
+  } finally {
+    // Clear the in-memory Set after each poll cycle completes.
+    // It only needs to guard against duplicates WITHIN a single poll run.
+    // Keeping IDs across polls prevents re-processing when a user deliberately
+    // removes the "Jasmine Processed" category to trigger a reprocess.
+    processingEmailIds.clear();
+    console.log("Poll cycle complete — processingEmailIds cleared.");
   }
 }
 
