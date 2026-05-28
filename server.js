@@ -413,12 +413,14 @@ Scentregroup: SYD=Mark Edmonds | VIC=Ross Mackenzie | QLD/WA/ACT=Paul Johnston |
 DEECA PRICING: Course $1,996.00 inc GST ($1,814.55 ex) | Materials $36.00 inc ($32.73 ex) | Travel $0.88/km return beyond 200km total | Accommodation $207/night | Meals $128.85/night
 DEECA TRAVEL: use Google Maps from Leopold VIC to venue. If >100km one-way: charge return trip beyond 200km @ $0.88/km. Include accommodation+meals. Do NOT mention Leopold in quote.
 
+CONFIRMATION REQUESTS: If the client is asking whether a session is already booked/confirmed (e.g. "can you confirm this is scheduled", "I have it noted as confirmed", "just checking this is still on"), use action_type=confirmation_check. Do NOT create a new booking. Set diane_summary to explain what the client is asking to confirm, and list the session details they mentioned in the bookings array with their existing dates/times. Do not generate trainer emails or client confirmation emails — set those fields to empty strings.
+
 EMAIL SIGN-OFF: Kind Regards\nDiane Kruger\nCorporate Operations Lead\nRisk 2 Solution Group\n1300 459 970
 
 OUTPUT JSON:
 {
   "bookings": [{
-    "action_type": "booking OR deeca_quote OR cancellation OR rescheduling OR conflict OR unknown",
+    "action_type": "booking OR confirmation_check OR deeca_quote OR cancellation OR rescheduling OR conflict OR unknown",
     "client": "", "session_type": "", "date": "REAL DATE never TBC",
     "state": "", "venue": "", "participants": 0,
     "trainers": [], "trainer_count": 0,
@@ -505,12 +507,12 @@ If DEECA form with multiple classes in section 2.2, list EACH class separately u
 
 Source material:
 ---
-${emailContent.slice(0, 20000)}`;
+${emailContent.slice(0, 10000)}`;
   }
 
   const step1Res = await client.messages.create({
     model: "claude-haiku-4-5-20251001",  // Haiku — fast, cheap, perfect for extraction
-    max_tokens: 2000,
+    max_tokens: 800,   // extraction output is short — list of facts, not prose
     messages: [{ role: "user", content: step1Content }]
   });
 
@@ -568,8 +570,18 @@ const BOOKING_KEYWORDS = [
   "flight crew", "personal safety", "authorised officer", "rp7", "rp8", "rp9"
 ];
 
+// If any of these appear in the body, it's an operational admin email (exam paperwork etc.)
+// and should be skipped regardless of booking keywords in the subject.
+const EXCLUSION_KEYWORDS = [
+  "exam sheet", "re-scan", "rescan", "scan back", "scan through",
+  "re-scan back", "scanned back", "please scan", "scan image from va",
+  "#12829", "#8021"  // VA exam reference numbers pattern won't generalise, use text patterns above
+];
+
 function looksLikeBookingEmail(subject, bodyText) {
   const haystack = ((subject || "") + " " + (bodyText || "")).toLowerCase();
+  // Hard exclusion — operational VA admin threads (exam paperwork, scan requests)
+  if (EXCLUSION_KEYWORDS.some(k => haystack.includes(k))) return false;
   return BOOKING_KEYWORDS.some(k => haystack.includes(k));
 }
 
@@ -874,6 +886,7 @@ async function processInboundEmail(email, clientName, token) {
 
   const bookingTagMap = {
     "booking": { label: "Booking Request", color: "#1d4ed8", bg: "#dbeafe" },
+    "confirmation_check": { label: "Confirmation Required", color: "#7c3aed", bg: "#f3e8ff" },
     "deeca_quote": { label: "DEECA Quote", color: "#15803d", bg: "#dcfce7" },
     "cancellation": { label: "Cancellation", color: "#b91c1c", bg: "#fef2f2" },
     "rescheduling": { label: "Rescheduling", color: "#d97706", bg: "#fef9c3" },
@@ -887,6 +900,8 @@ async function processInboundEmail(email, clientName, token) {
     id: Date.now(),
     timestamp: new Date().toISOString(),
     email_id: email.id,
+    email_web_link: email.webLink || "",          // ← Outlook web URL for "View Original" button
+    received_datetime: email.receivedDateTime || "",
     subject: email.subject,
     from_email: email.from && email.from.emailAddress ? email.from.emailAddress.address : "",
     client: clientName,
@@ -1164,7 +1179,13 @@ app.get("/api/check-auth", (req, res) => {
 
 // ── REVIEW QUEUE ──────────────────────────────────────────────────────────────
 app.get("/api/review-queue", requireAuth, (req, res) => {
-  res.json(reviewQueue.filter(e => e.status === "pending").reverse());
+  const pending = reviewQueue.filter(e => e.status === "pending");
+  pending.sort((a, b) => {
+    const da = new Date(a.received_datetime || a.timestamp);
+    const db = new Date(b.received_datetime || b.timestamp);
+    return db - da; // most recent first
+  });
+  res.json(pending);
 });
 
 app.get("/api/review-queue/count", requireAuth, (req, res) => {
@@ -1268,17 +1289,23 @@ app.post("/api/poll-now", requireAuth, async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Force reprocess — reads ALL emails ignoring the Jasmine Processed tag
-// Use this when testing or if something was missed
+// Force reprocess — scans recent 50 emails but only calls Jasmine on up to 20
+// that pass the booking keyword pre-scan and aren't already in the queue.
 app.post("/api/reprocess-all", requireAuth, async (req, res) => {
   try {
     const token = await getGraphToken();
     const result = await graphRequest("GET",
       "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,toRecipients,ccRecipients",
       null, token);
-    if (!result || !result.value) return res.json({ success: true, processed: 0 });
+    if (!result || !result.value) return res.json({ success: true, processed: 0, skipped: 0 });
     let count = 0;
+    let skipped = 0;
+    const API_CALL_LIMIT = 20; // never burn more than 20 Jasmine calls per Force Reprocess
     for (const email of result.value) {
+      if (count >= API_CALL_LIMIT) {
+        console.log("Reprocess: API call limit (" + API_CALL_LIMIT + ") reached — stopping.");
+        break;
+      }
       const senderEmail = (email.from && email.from.emailAddress ? email.from.emailAddress.address : "").toLowerCase();
       let clientName = getClientFromEmail(senderEmail);
       if (clientName === "INTERNAL") {
@@ -1291,16 +1318,24 @@ app.post("/api/reprocess-all", requireAuth, async (req, res) => {
         clientName = detectClientFromContent(subject) || detectClientFromContent(bodyText) || "Unknown — Internal Forward";
       }
       if (clientName) {
+        // Skip if already in queue
         const alreadyQueued = reviewQueue.some(e => e.email_id === email.id);
         if (alreadyQueued) {
           console.log("Skipping reprocess — already in queue: " + email.subject);
+          skipped++;
+          continue;
+        }
+        // Pre-scan: skip non-booking emails without using any API credits
+        if (!email.hasAttachments && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
+          console.log("Reprocess pre-scan: skipping non-booking email: " + email.subject);
+          skipped++;
           continue;
         }
         await processInboundEmail(email, clientName, token);
         count++;
       }
     }
-    res.json({ success: true, processed: count });
+    res.json({ success: true, processed: count, skipped });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
