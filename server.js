@@ -342,10 +342,35 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
 
   for (const bk of bookings) {
 
+    // ── DEECA bk.date normalisation ──────────────────────────────────────────
+    // Despite prompt instructions, Jasmine often puts ALL preferred dates into
+    // bk.date as a pipe/comma-separated string and leaves preferred_dates empty.
+    // Extract real dates from bk.date and populate preferred_dates before the
+    // resolution loop runs — this makes the logic robust regardless of Jasmine output.
+    if ((bk.action_type === "deeca_quote" || bk.full_day) && bk.date) {
+      const DATE_RE = /\b(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\b/gi;
+      const extracted = [...bk.date.matchAll(DATE_RE)].map(m => m[1]);
+      if (extracted.length > 1) {
+        // Multiple dates found in bk.date — split them out properly
+        if (!bk.preferred_dates || bk.preferred_dates.length === 0) {
+          bk.preferred_dates = extracted;
+        }
+        bk.date = extracted[0]; // set to first date only
+        console.log("DEECA date normalised — extracted", extracted.length, "dates, primary:", bk.date);
+      } else if (extracted.length === 1 && extracted[0] !== bk.date.trim()) {
+        bk.date = extracted[0]; // clean up any parenthetical noise e.g. "8 June 2026 (preferred)"
+      }
+      // Also normalise preferred_dates elements if they contain noise
+      if (bk.preferred_dates && bk.preferred_dates.length > 0) {
+        bk.preferred_dates = bk.preferred_dates.map(pd => {
+          const m = pd.match(DATE_RE);
+          return m ? m[0] : pd;
+        }).filter(Boolean);
+      }
+    }
+
     // ── DEECA preferred date resolution ──────────────────────────────────────
-    // For single-session DEECA with multiple date options, Jasmine sets
-    // preferred_dates: ["8 June 2026", "17 June 2026", "26 June 2026"].
-    // Iterate through each date and use the first one Ross/trainer is available.
+    // Iterate through each date option and use the first one the trainer is free for.
     if ((bk.action_type === "deeca_quote" || bk.full_day) &&
         bk.preferred_dates && bk.preferred_dates.length > 0) {
       let resolved = false;
@@ -574,6 +599,18 @@ DEECA EMAIL RULES:
 - FORBIDDEN: Never set date to "TBC" when the client has listed preferred dates. Always put the first listed date in "date" and all dates in "preferred_dates".
 
 DEECA QUOTE ACCEPTANCE: If the client email is accepting/approving a quote previously sent, use action_type="deeca_quote_acceptance". Set diane_summary to flag that the client has accepted the quote and is ready to confirm. Do not create new calendar events — Diane will approve and trigger the calendar invite.
+
+DEECA KNOWN VENUES & TRAVEL (from Leopold VIC):
+- 8 Nicholson St, East Melbourne: ~85 km one-way → UNDER 100 km → NO travel charge, NO overnight, lunch only
+- 2 Lonsdale St, Melbourne: ~90 km one-way → UNDER 100 km → NO travel charge, NO overnight, lunch only
+- For any Melbourne CBD/metro venue: day trip, no travel charge, no accommodation, lunch only
+- NEVER say location is unknown if a venue address is provided anywhere in the email or form.
+
+DEECA SINGLE-SESSION — TENTATIVE BOOKING RULES:
+- ONE date only gets tentatively booked (the calendar checks which date is free automatically).
+- NEVER list all preferred dates in the client email — confirm only the ONE date that was booked.
+- NEVER say "calendar hold as TENTATIVE on all three" — only one is held.
+- The client email must say: "[date] has been tentatively held. Please find the quote attached. Once you confirm approval, we will formally confirm the booking with the trainer."
 
 DEECA COST RULES:
 - MATERIALS field: always $0.00 — do NOT charge materials for DEECA.
@@ -1089,6 +1126,27 @@ async function processInboundEmail(email, clientName, token) {
     jasmineParsed = result.jasmineParsed;
     extractedFacts = result.extractedFacts;
 
+    // ── Hardcode client reply address to FROM email ──────────────────────────
+    // DEECA forms contain Organisational_Capability_Team@deeca.vic.gov.au which
+    // confuses Jasmine. Always override with the actual sender's address.
+    const fromAddr = email.from && email.from.emailAddress
+      ? email.from.emailAddress.address : "";
+    if (fromAddr && fromAddr.includes("@")) {
+      jasmineParsed.client_email_to = fromAddr;
+    }
+    // Fix greeting to use sender's first name, not "Team" or org name
+    const displayName = email.from && email.from.emailAddress
+      ? (email.from.emailAddress.name || "") : "";
+    const firstName = displayName.split(/[\s(]/)[0] ||
+      fromAddr.split("@")[0].split(".")[0] || "";
+    const greeting = firstName
+      ? "Dear " + firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase() + ","
+      : "Dear Saro,";
+    if (jasmineParsed.client_email_body) {
+      jasmineParsed.client_email_body = jasmineParsed.client_email_body
+        .replace(/^Dear [^,\r\n]+,?/m, greeting);
+    }
+
     // ── Calendar availability + tentative pre-booking ──────────────────────────
     // checkCalendarAvailability checks for slot/trainer conflicts and, if clear,
     // immediately creates a TENTATIVE calendar event to hold the slot.
@@ -1098,14 +1156,47 @@ async function processInboundEmail(email, clientName, token) {
         { client: clientName }, jasmineParsed, token
       );
 
-      // Sync CLASS_DATES in the quote fields to the actual resolved booking date.
-      // Jasmine may write the full preferred-dates list before knowing which date
-      // was available — replace it with the single confirmed date after resolution.
+      // ── Post-calendar fixes for DEECA bookings ─────────────────────────────
       for (const bk of (jasmineParsed.bookings || [])) {
         if ((bk.action_type === "deeca_quote" || bk.full_day) &&
-            bk.date && bk.date.toLowerCase() !== "tbc" &&
-            jasmineParsed.quote_section5_fields) {
-          jasmineParsed.quote_section5_fields.CLASS_DATES = bk.date;
+            bk.date && bk.date.toLowerCase() !== "tbc") {
+
+          // Sync CLASS_DATES to the single resolved date
+          if (jasmineParsed.quote_section5_fields) {
+            jasmineParsed.quote_section5_fields.CLASS_DATES = bk.date;
+          }
+
+          // Rewrite client email body to mention ONLY the booked date, not all preferred dates
+          if (jasmineParsed.client_email_body &&
+              (jasmineParsed.client_email_body.includes("preferred") ||
+               jasmineParsed.client_email_body.includes("alt 1") ||
+               jasmineParsed.client_email_body.includes("alt 2") ||
+               jasmineParsed.client_email_body.includes("(alt") ||
+               jasmineParsed.client_email_body.includes("all three") ||
+               jasmineParsed.client_email_body.includes("following dates") ||
+               jasmineParsed.client_email_body.match(/\d+ June \d{4}.*\d+ June \d{4}/))) {
+            try {
+              const rewriteRes = await client.messages.create({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 500,
+                messages: [{ role: "user", content:
+                  "Rewrite this DEECA client email body. ONE date has been tentatively booked: " + bk.date + ".\n" +
+                  "Rules:\n" +
+                  "- Open with: 'Thank you for your training request. We are pleased to advise that " + bk.date + " has been tentatively held for your Personal Safety and Conflict Management session.'\n" +
+                  "- Do NOT mention alternative dates, preferred dates, or any other date options.\n" +
+                  "- Say the attached quote is for their review and once they confirm approval, the booking will be formally confirmed with the trainer.\n" +
+                  "- Address them by first name (keep the existing Dear [name] if it uses a first name, otherwise use 'Dear Saro' for DEECA).\n" +
+                  "- Keep it brief, professional, Australian English.\n" +
+                  "- Return ONLY the rewritten body, no preamble.\n\n" +
+                  "Original body:\n" + jasmineParsed.client_email_body
+                }]
+              });
+              jasmineParsed.client_email_body = rewriteRes.content[0].text || jasmineParsed.client_email_body;
+              console.log("DEECA client email rewritten to single confirmed date:", bk.date);
+            } catch (err) {
+              console.error("DEECA email rewrite error:", err.message);
+            }
+          }
         }
       }
 
