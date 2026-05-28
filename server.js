@@ -661,22 +661,7 @@ async function pollInbox() {
             summary: "Unrecognised sender — no action taken"
           });
         } else {
-          // Check if this is a reply to a thread we already handled
-          const alreadyHandled = await alreadyRepliedToThread(email.conversationId, token);
-          if (alreadyHandled) {
-            console.log("Reply to already-handled thread — tagging without reprocessing: " + email.subject);
-            emailLog.push({
-              id: Date.now(),
-              timestamp: new Date().toISOString(),
-              subject: email.subject,
-              from: senderEmail,
-              client: clientName,
-              status: "reply_to_handled",
-              summary: "Reply to an already-processed conversation — no new action required"
-            });
-          } else {
             await processInboundEmail(email, clientName, token);
-          }
         }
 
         // Tag as processed
@@ -703,10 +688,12 @@ async function processInboundEmail(email, clientName, token) {
     : email.bodyPreview || "";
 
   // ── Quick relevance check — skip before spending any API credits ─────────
-  // If the subject + body preview contain zero booking-related keywords AND
-  // the email has no attachments, it's almost certainly an operational thread
-  // (feedback replies, exam admin, internal FYIs etc.). Log and skip.
-  if (!email.hasAttachments && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
+  // Internal forwards (FW:/Fwd: from staff) are always intentional — bypass pre-scan.
+  const isInternalForward = (clientName === "INTERNAL" || (email.from && email.from.emailAddress &&
+    email.from.emailAddress.address.toLowerCase().includes("@risk2solution.com"))) &&
+    /^(fw|fwd|re:\s*fw|re:\s*fwd):/i.test(email.subject || "");
+
+  if (!isInternalForward && !email.hasAttachments && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
     console.log("Pre-scan: no booking keywords found — skipping without API call: " + email.subject);
     emailLog.push({
       id: Date.now(),
