@@ -68,6 +68,9 @@ const DIANE_SIGNATURE_HTML = `
 const reviewQueue = [];
 const bookingsLog = [];
 const emailLog    = [];
+// In-memory guard: tracks email IDs currently mid-processing or already processed
+// this session. Prevents duplicate queue entries if poll is called twice rapidly.
+const processingEmailIds = new Set();
 
 const DATA_DIR  = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR,  "jasmine_store.json");
@@ -233,8 +236,10 @@ async function checkCalendarSlot(startDT, endDT, token, trainerNames = []) {
       "&$select=subject,start,end,showAs&$top=20",
       null, t
     );
+    // Include "tentative" in time-slot conflicts — if Jasmine already holds a tentative
+    // slot for another booking on this date, a second processing run must not overwrite it.
     const timeConflicts = (slotResult && slotResult.value || []).filter(e =>
-      e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere"
+      e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere" || e.showAs === "tentative"
     );
 
     // (b) If trainers provided, check the full calendar day for same-trainer clashes
@@ -390,6 +395,13 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
       continue;
     }
 
+    // Hard guard — never create a tentative event if a conflict was flagged.
+    // Defensive check in case the continue above was somehow bypassed.
+    if (bk.calendar_conflict) {
+      console.log("Hard conflict guard: skipping tentative for conflicted DEECA slot:", bk.session_type, "on", bk.date);
+      continue;
+    }
+
     const isFullDay = bk.full_day || false;
 
     // For all-day events (DEECA full_day=true) Graph API requires dateTime+timeZone at midnight.
@@ -500,8 +512,18 @@ CONFIRMATION REQUESTS: If the client is asking whether a session is already book
 EMAIL RULES:
 - Always write in Australian English (organise, authorise, programme, colour, etc.).
 - Sign-off is appended automatically — do NOT include it in client_email_body.
+- client_email_to: ALWAYS use the FROM address of the incoming email — never a group/org mailbox.
+- Address the client by their FIRST NAME from the email signature (e.g. "Dear Saro,") — never "Dear Team".
 - For VA client emails, open the body with: "We are pleased to confirm that the following Security Awareness sessions are booked as requested:"
 - For VA bookings, NEVER suggest alternative dates — always accommodate the original requested dates.
+
+DEECA EMAIL RULES:
+- DEECA bookings are ALWAYS tentative until a signed quote is returned — always say "tentatively booked", never "confirmed" or "proceeding as planned".
+- When a date is unavailable: say "the [date] session is unavailable" — do NOT give the reason (e.g. do not mention trainer name or "prior commitment").
+- Closing for DEECA emails: "Once you confirm your preferred date, we will tentatively book it in and send you a quote for review."
+- DEECA SINGLE-SESSION REQUEST (3 date options): The client wants ONE session. Check which dates Ross/trainer is available. Tentatively book the FIRST available date. In the client email, confirm that date as tentatively booked, apologise for any unavailable dates, list alternatives from calendar.
+
+DEECA QUOTE ACCEPTANCE: If the client email is accepting/approving a quote previously sent, use action_type="deeca_quote_acceptance". Set diane_summary to flag that the client has accepted the quote and is ready to confirm. Do not create new calendar events — Diane will approve and trigger the calendar invite.
 
 DEECA COST RULES:
 - MATERIALS field: always $0.00 — do NOT charge materials for DEECA.
@@ -599,7 +621,13 @@ VENUE: (full address)
 PARTICIPANTS:
 NOTES:
 
-If DEECA form with multiple classes in section 2.2, list EACH class separately using Preferred date 1.
+DEECA DATE RULES — READ CAREFULLY:
+- If the email says "one of the following dates" / "on one of the following" / lists dates as numbered options (1. date, 2. date, 3. date) — these are DATE OPTIONS for a SINGLE session. Extract ONE booking only. List all date options under PREFERRED DATES.
+- If section heading is "2.1 Individual Class" → always ONE session regardless of how many dates are listed.
+- If section heading is "2.2 Series / Multiple Classes" → extract EACH class as a separate booking.
+- If dates are labeled "Class 1 –", "Class 2 –" etc. under a SERIES heading → separate bookings. Under an INDIVIDUAL heading → date options.
+- NEVER create multiple bookings from a single-session request just because multiple dates are listed.
+- The FROM email address is the contact's direct email — always include it.
 
 Source material:
 ---
@@ -798,10 +826,30 @@ async function pollInbox() {
             summary: "Unrecognised sender — no action taken"
           });
         } else {
-            await processInboundEmail(email, clientName, token);
+            // Hard dedup — prevents double-processing if poll fires twice rapidly
+            // or if Outlook's category filter hasn't propagated yet.
+            if (processingEmailIds.has(email.id)) {
+              console.log("Already processing this email ID — skipping duplicate:", email.subject);
+              continue;
+            }
+            if (reviewQueue.some(e => e.email_id === email.id)) {
+              console.log("Email already in review queue — skipping:", email.subject);
+              continue;
+            }
+            if (emailLog.some(e => e.email_id === email.id)) {
+              console.log("Email already in email log — skipping:", email.subject);
+              continue;
+            }
+            processingEmailIds.add(email.id);
+            try {
+              await processInboundEmail(email, clientName, token);
+            } finally {
+              // Keep in Set for the rest of this poll cycle; cleared on next server restart
+              // (Outlook category tag is the persistent guard across restarts)
+            }
         }
 
-        // Tag as processed
+        // Tag as processed in Outlook — persistent guard across server restarts
         await graphRequest("PATCH",
           "/users/" + TRAINING_MAILBOX + "/messages/" + email.id,
           { categories: [...(email.categories || []), "Jasmine Processed"] },
@@ -1116,6 +1164,7 @@ async function processInboundEmail(email, clientName, token) {
     "booking": { label: "Booking Request", color: "#1d4ed8", bg: "#dbeafe" },
     "confirmation_check": { label: "Confirmation Required", color: "#7c3aed", bg: "#f3e8ff" },
     "deeca_quote": { label: "DEECA Quote", color: "#15803d", bg: "#dcfce7" },
+    "deeca_quote_acceptance": { label: "DEECA Quote Accepted", color: "#166534", bg: "#bbf7d0" },
     "cancellation": { label: "Cancellation", color: "#b91c1c", bg: "#fef2f2" },
     "rescheduling": { label: "Rescheduling", color: "#d97706", bg: "#fef9c3" },
     "conflict": { label: "Conflict", color: "#7c3aed", bg: "#f3e8ff" },
@@ -1691,6 +1740,7 @@ app.post("/api/process-email", requireAuth, async (req, res) => {
     const bookingTagMap = {
       "booking": { label: "Booking Request", color: "#1d4ed8", bg: "#dbeafe" },
       "deeca_quote": { label: "DEECA Quote", color: "#15803d", bg: "#dcfce7" },
+    "deeca_quote_acceptance": { label: "DEECA Quote Accepted", color: "#166534", bg: "#bbf7d0" },
       "rescheduling": { label: "Rescheduling", color: "#d97706", bg: "#fef9c3" },
       "cancellation": { label: "Cancellation", color: "#b91c1c", bg: "#fef2f2" },
       "unknown": { label: "Needs Review", color: "#64748b", bg: "#f1f5f9" }
