@@ -575,12 +575,12 @@ const BOOKING_KEYWORDS = [
 const EXCLUSION_KEYWORDS = [
   "exam sheet", "re-scan", "rescan", "scan back", "scan through",
   "re-scan back", "scanned back", "please scan", "scan image from va",
-  "#12829", "#8021"  // VA exam reference numbers pattern won't generalise, use text patterns above
+  "feedback", "survey", "course feedback", "training feedback"
 ];
 
 function looksLikeBookingEmail(subject, bodyText) {
   const haystack = ((subject || "") + " " + (bodyText || "")).toLowerCase();
-  // Hard exclusion — operational VA admin threads (exam paperwork, scan requests)
+  // Hard exclusion — operational threads always blocked regardless of attachments
   if (EXCLUSION_KEYWORDS.some(k => haystack.includes(k))) return false;
   return BOOKING_KEYWORDS.some(k => haystack.includes(k));
 }
@@ -591,14 +591,32 @@ async function pollInbox() {
   console.log("Jasmine polling inbox...");
   try {
     const token = await getGraphToken();
-    const result = await graphRequest("GET",
-      "/users/" + TRAINING_MAILBOX + "/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,webLink,conversationId,toRecipients,ccRecipients",
-      null, token);
 
-    if (!result || !result.value) { console.log("No emails found."); return; }
-    console.log("Inbox has " + result.value.length + " email(s).");
+    // Filter unprocessed emails IN the Graph query — not client-side.
+    // This means $top=50 applies only to emails WITHOUT the "Jasmine Processed" tag,
+    // so even if the inbox has 500 tagged emails, manually-untagged ones are always found.
+    // ConsistencyLevel: eventual is required for $filter + $orderby on message categories.
+    const result = await fetch(
+      "https://graph.microsoft.com/v1.0/users/" + TRAINING_MAILBOX +
+      "/mailFolders/inbox/messages" +
+      "?$filter=not categories/any(c:c eq 'Jasmine Processed')" +
+      "&$orderby=receivedDateTime desc" +
+      "&$top=50" +
+      "&$count=true" +
+      "&$select=id,subject,from,bodyPreview,body,receivedDateTime,hasAttachments,categories,webLink,conversationId,toRecipients,ccRecipients",
+      {
+        headers: {
+          "Authorization": "Bearer " + token,
+          "ConsistencyLevel": "eventual",   // required for advanced $filter on categories
+          "Content-Type": "application/json"
+        }
+      }
+    ).then(r => r.json());
 
-    // Filter out calendar invites, auto-replies, out-of-office, delivery reports
+    if (!result || !result.value) { console.log("No unprocessed emails found."); return; }
+    console.log("Unprocessed emails from Graph: " + result.value.length);
+
+    // shouldSkip: filter out calendar noise, auto-replies etc.
     const shouldSkip = (email) => {
       const subj = (email.subject || "").toLowerCase();
       const ct = (email.contentType || "").toLowerCase();
@@ -606,7 +624,7 @@ async function pollInbox() {
       if (subj.startsWith("accepted:")) return true;
       if (subj.startsWith("declined:")) return true;
       if (subj.startsWith("tentative:")) return true;
-      if (subj.startsWith("cancelled:")) return false; // DO process cancellations
+      if (subj.startsWith("cancelled:")) return false;
       if (subj.startsWith("automatic reply:")) return true;
       if (subj.startsWith("out of office:")) return true;
       if (subj.includes("delivery failed")) return true;
@@ -614,11 +632,8 @@ async function pollInbox() {
       return false;
     };
 
-    const unprocessed = result.value.filter(email =>
-      (!email.categories || !email.categories.includes("Jasmine Processed")) &&
-      !shouldSkip(email)
-    );
-    console.log("Unprocessed: " + unprocessed.length);
+    const unprocessed = result.value.filter(email => !shouldSkip(email));
+    console.log("After skip-filter: " + unprocessed.length + " to process");
 
     for (const email of unprocessed) {
       try {
@@ -693,7 +708,7 @@ async function processInboundEmail(email, clientName, token) {
     email.from.emailAddress.address.toLowerCase().includes("@risk2solution.com"))) &&
     /^(fw|fwd|re:\s*fw|re:\s*fwd):/i.test(email.subject || "");
 
-  if (!isInternalForward && !email.hasAttachments && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
+  if (!isInternalForward && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
     console.log("Pre-scan: no booking keywords found — skipping without API call: " + email.subject);
     emailLog.push({
       id: Date.now(),
