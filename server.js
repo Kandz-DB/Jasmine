@@ -42,6 +42,26 @@ if (TEST_MODE) {
   console.log("   Set TEST_MODE=false in your environment to use real addresses.");
 }
 
+// ── DIANE'S EMAIL SIGNATURE ───────────────────────────────────────────────────
+const DIANE_SIGNATURE_HTML = `
+<br><br>
+<table cellpadding="0" cellspacing="0" style="font-family:Arial,sans-serif;font-size:13px;color:#333333;border-collapse:collapse;">
+  <tr>
+    <td style="padding-right:24px;vertical-align:top;">
+      <p style="margin:0 0 12px 0;">Kind Regards,</p>
+      <p style="margin:0;"><strong>Diane Kruger</strong></p>
+      <p style="margin:0;">Corporate Operations Lead</p>
+      <p style="margin:0;">Risk 2 Solution Group</p>
+    </td>
+    <td style="border-left:2px solid #cc0000;padding-left:24px;vertical-align:top;">
+      <p style="margin:2px 0;">&#128222; 1300 459 970 | +61 415 748 747</p>
+      <p style="margin:2px 0;">&#9993; diane.k@risk2solution.com</p>
+      <p style="margin:2px 0;"><a href="https://www.risk2solution.com" style="color:#cc0000;">www.risk2solution.com</a></p>
+      <p style="margin:2px 0;">&#128205; Queensland, Australia</p>
+    </td>
+  </tr>
+</table>`;
+
 // ── IN-MEMORY STORES + FILE PERSISTENCE ──────────────────────────────────────
 // Data lives in memory for speed and survives restarts via jasmine_store.json.
 // Atomic write (tmp → rename) means a crash mid-save never corrupts the file.
@@ -355,10 +375,20 @@ async function checkCalendarAvailability(entry, jasmineParsed, token) {
       continue;
     }
 
-    // Slot is available — create a TENTATIVE calendar event to hold it.
-    // attendees: [] means no meeting-request emails are fired at this point.
-    // Attendees are added (and invites sent) only when Diane hits Confirm.
+    // Slot is available.
+    // Only DEECA gets a TENTATIVE pre-booking during processing — we hold the slot
+    // immediately because DEECA requires Diane's approval before confirmation.
+    // All other clients: calendar event is created fresh on Diane's approval,
+    // keeping the calendar clean with no phantom tentative entries.
     bk.trainer_emails_for_invite = trainerEmailsForApprove;
+    bk.calendar_available = true;
+
+    const isDeecaBooking = bk.action_type === "deeca_quote" || bk.full_day;
+    if (!isDeecaBooking) {
+      results.calendar_events.push({ session_type: bk.session_type, date: bk.date, event_id: null, tentative: false });
+      console.log("✓ Slot available (non-DEECA — event will be created on approval):", bk.session_type, "on", bk.date);
+      continue;
+    }
 
     const isFullDay = bk.full_day || false;
 
@@ -467,7 +497,21 @@ DEECA TRAVEL: use Google Maps from Leopold VIC to venue. If >100km one-way: char
 
 CONFIRMATION REQUESTS: If the client is asking whether a session is already booked/confirmed (e.g. "can you confirm this is scheduled", "I have it noted as confirmed", "just checking this is still on"), use action_type=confirmation_check. Do NOT create a new booking. Set diane_summary to explain what the client is asking to confirm, and list the session details they mentioned in the bookings array with their existing dates/times. Do not generate trainer emails or client confirmation emails — set those fields to empty strings.
 
-EMAIL SIGN-OFF: Kind Regards\nDiane Kruger\nCorporate Operations Lead\nRisk 2 Solution Group\n1300 459 970
+EMAIL RULES:
+- Always write in Australian English (organise, authorise, programme, colour, etc.).
+- Sign-off is appended automatically — do NOT include it in client_email_body.
+- For VA client emails, open the body with: "We are pleased to confirm that the following Security Awareness sessions are booked as requested:"
+- For VA bookings, NEVER suggest alternative dates — always accommodate the original requested dates.
+
+DEECA COST RULES:
+- MATERIALS field: always $0.00 — do NOT charge materials for DEECA.
+- ACCOM_MEALS field: calculate accommodation + meals as follows:
+  * Lunch: always required for each session day (trainer expense — confirm rate with Diane).
+  * If trainer must stay overnight (venue too far for same-day return from Leopold VIC):
+    add Accommodation $207.00/night + Dinner & Breakfast $128.85/night per night.
+  * If day trip only: meals = lunch only per session day.
+  * Use Google Maps distance from Leopold VIC to venue to determine overnight necessity.
+  * Flag ACCOM_MEALS in diane_summary if overnight calculation needs Diane to confirm km.
 
 OUTPUT JSON:
 {
@@ -786,6 +830,26 @@ async function processInboundEmail(email, clientName, token) {
     email.from.emailAddress.address.toLowerCase().includes("@risk2solution.com"))) &&
     /^(fw|fwd|re:\s*fw|re:\s*fwd):/i.test(email.subject || "");
 
+  // Forwarded calendar/meeting invites (e.g. Diane → training@) must be skipped —
+  // they are already-confirmed bookings, not new requests for Jasmine to process.
+  const isForwardedCalendarInvite = isInternalForward &&
+    /When:\s+\w+day,/i.test(bodyText) &&
+    /Where:\s+/i.test(bodyText) &&
+    /(Microsoft Teams meeting|Meeting ID:|teams\.microsoft\.com|teams meeting)/i.test(bodyText);
+
+  if (isForwardedCalendarInvite) {
+    console.log("Skipping forwarded calendar/meeting invite — not a new booking request: " + email.subject);
+    emailLog.push({
+      id: Date.now(), timestamp: new Date().toISOString(),
+      subject: email.subject,
+      from: email.from && email.from.emailAddress ? email.from.emailAddress.address : "",
+      client: clientName, status: "skipped_calendar_invite",
+      summary: "Forwarded calendar/meeting invite — already handled, no action needed"
+    });
+    persistSave();
+    return;
+  }
+
   if (!isInternalForward && !looksLikeBookingEmail(email.subject, bodyText)) {
     console.log("Pre-scan: no booking keywords found — skipping without API call: " + email.subject);
     emailLog.push({
@@ -915,6 +979,18 @@ async function processInboundEmail(email, clientName, token) {
       if (calResults.conflicts.length > 0) {
         console.log("Calendar conflicts found:", calResults.conflicts.length, "slots — fetching alternatives for all.");
 
+        // For VA, we never offer alternative dates — we always accommodate their schedule.
+        // Just flag the conflict for Diane to resolve directly with VA operations.
+        const isVAClient = clientName && /virgin australia|\bva\b/i.test(clientName);
+        if (isVAClient) {
+          const vaNote = "\n\n⚠ VA SCHEDULING CONFLICT — do not offer alternative dates for VA. " +
+            "Resolve directly with VA: " +
+            calResults.conflicts.map(c => c.session_type + " on " + c.date).join(", ");
+          jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + vaNote;
+          jasmineParsed.has_conflicts = true;
+          console.log("VA conflict flagged for Diane — no alternatives offered.");
+        } else {
+
         // ── Step 1: Gather alternatives for every conflicted date in parallel ─
         const conflictedDates = [];   // { date, session_type, trainerMsg, alts[] }
         for (const conflict of calResults.conflicts) {
@@ -992,6 +1068,8 @@ async function processInboundEmail(email, clientName, token) {
           "\n\nClient draft updated — covers confirmed and unavailable dates in one email. Please review before sending.";
         jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + conflictNote;
         jasmineParsed.has_conflicts = true;
+
+        } // end non-VA conflict handling
       }
     }
   } catch (err) {
@@ -1126,12 +1204,16 @@ async function processInboundEmail(email, clientName, token) {
   // in the review queue — see approveQueueEntry(). This ensures nothing is
   // staged in Outlook until Diane has reviewed and approved the booking.
 
-  // Log to bookings
+  // Log to bookings — include DEECA form fields so they persist in the Bookings
+  // tab after the queue entry is approved and removed from the review queue.
   for (const bk of bookings) {
     bookingsLog.push({
       ...bk,
       id: Date.now() + Math.floor(Math.random() * 9999),
       queue_id: entry.id,
+      deeca_form_fields: jasmineParsed.quote_section5_fields || {},
+      deeca_form_text: jasmineParsed.quote_section5 || "",
+      original_docx_name: originalDocxName || "",
       status: bk.action_type === "deeca_quote" ? "Tentative — Pending Quote Approval" : "Pending Approval",
       created: new Date().toISOString()
     });
@@ -1195,6 +1277,17 @@ async function approveQueueEntry(entry) {
             showAs: isDeeca ? "tentative" : "busy",
             subject: (bk.calendar_title || (entry.client + " — " + bk.session_type))
               .replace(" [Tentative]", ""),
+            // Replace the tentative body text with clean confirmed body
+            body: {
+              contentType: "HTML",
+              content: "<p><strong>Client:</strong> " + entry.client + "</p>" +
+                "<p><strong>Session:</strong> " + bk.session_type + "</p>" +
+                "<p><strong>Trainers:</strong> " + (bk.trainers || []).join(", ") + "</p>" +
+                "<p><strong>Venue:</strong> " + (bk.venue || "TBC") + "</p>" +
+                "<p><strong>Participants:</strong> " + (bk.participants || "TBC") + "</p>" +
+                (bk.calendar_note ? "<p><strong>Notes:</strong> " + bk.calendar_note + "</p>" : "") +
+                (isDeeca ? "<p><em>DEECA booking — pending DEECA confirmation.</em></p>" : "<p><em>Booked by Jasmine — Risk 2 Solution Group</em></p>")
+            },
             attendees: inviteAttendees  // adding attendees now triggers invite emails
           }, token);
         results.calendar.push(bk.session_type + " confirmed — trainer invites sent");
@@ -1310,7 +1403,7 @@ async function approveQueueEntry(entry) {
           {
             subject: (TEST_MODE ? "[TEST] " : "") + (entry.client_email_subject || "Training Booking Confirmation"),
             toRecipients: [{ emailAddress: { address: safeEmail(entry.client_email_to) } }],
-            body: { contentType: "HTML", content: (TEST_MODE ? "<div style=\"background:#fef9c3;border:1px solid #ca8a04;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;\"><strong>⚠ TEST MODE</strong> — Real recipient: <em>" + entry.client_email_to + "</em> · Redirected to " + TEST_EMAIL + "</div>" : "") + "<p>" + (entry.client_email_body||"").split("\n").join("<br>") + "</p>" },
+            body: { contentType: "HTML", content: (TEST_MODE ? "<div style=\"background:#fef9c3;border:1px solid #ca8a04;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;\"><strong>⚠ TEST MODE</strong> — Real recipient: <em>" + entry.client_email_to + "</em> · Redirected to " + TEST_EMAIL + "</div>" : "") + "<p>" + (entry.client_email_body||"").replace(/Kind Regards[\s\S]*$/i, "").split("\n").join("<br>") + "</p>" + DIANE_SIGNATURE_HTML },
             isDraft: true
           }, token);
         if (clientDraft && clientDraft.id) {
@@ -1557,12 +1650,105 @@ app.get("/api/email-log", requireAuth, (req, res) => {
 });
 
 // ── MANUAL PROCESS EMAIL (from Process Email tab) ─────────────────────────────
+// Behaves identically to the inbox poll path: Jasmine parses the email, checks
+// calendar availability (DEECA gets tentative pre-booking; others just checked),
+// creates a queue entry, and generates Outlook drafts — just like a real email.
 app.post("/api/process-email", requireAuth, async (req, res) => {
   const { content, images } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: "No content provided" });
   try {
+    const token = await getGraphToken();
     const { jasmineParsed, extractedFacts } = await processEmailWithJasmine(content, images || []);
-    res.json({ success: true, result: jasmineParsed, extracted_facts: extractedFacts });
+    const bookings = jasmineParsed.bookings || [];
+    const clientName = bookings.length > 0 && bookings[0].client ? bookings[0].client : "Manual Entry";
+
+    // Calendar availability check + DEECA tentative pre-booking
+    if (token && bookings.length > 0) {
+      const calResults = await checkCalendarAvailability({ client: clientName }, jasmineParsed, token);
+      if (calResults.conflicts.length > 0) {
+        const conflictNote = "\n\n⚠ CALENDAR CONFLICTS: " +
+          calResults.conflicts.map(c => c.session_type + " on " + c.date).join(", ");
+        jasmineParsed.diane_summary = (jasmineParsed.diane_summary || "") + conflictNote;
+        jasmineParsed.has_conflicts = true;
+      }
+    }
+
+    // Build a synthetic email object for the queue entry
+    const syntheticEmail = {
+      id: "manual-" + Date.now(),
+      subject: bookings.length > 0 ? (bookings[0].client + " — " + bookings[0].session_type) : "Manual Entry",
+      from: { emailAddress: { address: DIANE_EMAIL } },
+      body: { content: content },
+      bodyPreview: content.slice(0, 255),
+      receivedDateTime: new Date().toISOString(),
+      categories: [],
+      hasAttachments: false,
+      webLink: ""
+    };
+
+    // Build and push queue entry (same structure as processInboundEmail)
+    const overallActionType = bookings.length > 0 ? bookings[0].action_type : "unknown";
+    const bookingTagMap = {
+      "booking": { label: "Booking Request", color: "#1d4ed8", bg: "#dbeafe" },
+      "deeca_quote": { label: "DEECA Quote", color: "#15803d", bg: "#dcfce7" },
+      "rescheduling": { label: "Rescheduling", color: "#d97706", bg: "#fef9c3" },
+      "cancellation": { label: "Cancellation", color: "#b91c1c", bg: "#fef2f2" },
+      "unknown": { label: "Needs Review", color: "#64748b", bg: "#f1f5f9" }
+    };
+    const bookingTag = bookingTagMap[overallActionType] || bookingTagMap["unknown"];
+
+    const entry = {
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
+      email_id: syntheticEmail.id,
+      email_web_link: "",
+      received_datetime: syntheticEmail.receivedDateTime,
+      subject: syntheticEmail.subject,
+      from_email: DIANE_EMAIL,
+      client: clientName,
+      action_type: overallActionType,
+      booking_tag: bookingTag,
+      bookings,
+      client_email_to: jasmineParsed.client_email_to || "",
+      client_email_subject: jasmineParsed.client_email_subject || "",
+      client_email_body: jasmineParsed.client_email_body || "",
+      trainer_emails: jasmineParsed.trainer_emails || [],
+      quote_section5: jasmineParsed.quote_section5 || "",
+      quote_section5_fields: jasmineParsed.quote_section5_fields || {},
+      quote_total: jasmineParsed.quote_total || 0,
+      diane_summary: jasmineParsed.diane_summary || "",
+      overall_flags: jasmineParsed.overall_flags || [],
+      extracted_facts: extractedFacts,
+      original_docx: null,
+      original_docx_name: "",
+      status: "pending",
+      drafts: [],
+      manual_entry: true
+    };
+
+    for (const bk of bookings) {
+      bookingsLog.push({
+        ...bk,
+        id: Date.now() + Math.floor(Math.random() * 9999),
+        queue_id: entry.id,
+        deeca_form_fields: jasmineParsed.quote_section5_fields || {},
+        deeca_form_text: jasmineParsed.quote_section5 || "",
+        status: bk.action_type === "deeca_quote" ? "Tentative — Pending Quote Approval" : "Pending Approval",
+        created: new Date().toISOString()
+      });
+    }
+
+    emailLog.push({
+      id: Date.now(), timestamp: new Date().toISOString(),
+      subject: entry.subject, from: DIANE_EMAIL, client: clientName,
+      status: entry.action_type, summary: entry.diane_summary,
+      booking_count: bookings.length
+    });
+
+    reviewQueue.push(entry);
+    persistSave();
+    console.log("Manual entry added to queue for " + clientName);
+    res.json({ success: true, result: jasmineParsed, extracted_facts: extractedFacts, queue_id: entry.id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
