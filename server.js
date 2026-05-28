@@ -573,9 +573,19 @@ const BOOKING_KEYWORDS = [
 // If any of these appear in the body, it's an operational admin email (exam paperwork etc.)
 // and should be skipped regardless of booking keywords in the subject.
 const EXCLUSION_KEYWORDS = [
+  // VA exam admin
   "exam sheet", "re-scan", "rescan", "scan back", "scan through",
   "re-scan back", "scanned back", "please scan", "scan image from va",
-  "feedback", "survey", "course feedback", "training feedback"
+  // Feedback / surveys
+  "feedback", "survey", "course feedback", "training feedback",
+  // Results / records admin (not bookings)
+  "class list", "attendance record", "attendance sheet", "summary report",
+  "course summary", "send results", "please send results", "missing results",
+  "has been actioned", "been actioned",
+  // IT / account issues
+  "password", "log in", "login", "unable to complete", "unable to access",
+  // General admin noise
+  "monthly reporting", "please send through", "still missing"
 ];
 
 function looksLikeBookingEmail(subject, bodyText) {
@@ -586,20 +596,36 @@ function looksLikeBookingEmail(subject, bodyText) {
 }
 
 
+// Returns Monday 00:00 AEST of the current week as a UTC ISO string.
+// AEST = UTC+10. Used to restrict inbox polling to this week only.
+function getWeekStartUTC() {
+  const AEST_OFFSET_MS = 10 * 60 * 60 * 1000;
+  const nowAEST = new Date(Date.now() + AEST_OFFSET_MS);
+  const dow = nowAEST.getUTCDay(); // 0=Sun, 1=Mon … 6=Sat
+  const daysToMonday = dow === 0 ? 6 : dow - 1;
+  const mondayAEST = new Date(nowAEST);
+  mondayAEST.setUTCDate(mondayAEST.getUTCDate() - daysToMonday);
+  mondayAEST.setUTCHours(0, 0, 0, 0);
+  return new Date(mondayAEST.getTime() - AEST_OFFSET_MS).toISOString();
+}
+
 async function pollInbox() {
   if (!AZURE_CLIENT_ID) { console.log("Graph not configured — skipping poll."); return; }
   console.log("Jasmine polling inbox...");
   try {
     const token = await getGraphToken();
 
-    // Filter unprocessed emails IN the Graph query — not client-side.
-    // This means $top=50 applies only to emails WITHOUT the "Jasmine Processed" tag,
-    // so even if the inbox has 500 tagged emails, manually-untagged ones are always found.
-    // ConsistencyLevel: eventual is required for $filter + $orderby on message categories.
+    // Fetch only this week's unprocessed emails from Graph.
+    // Date filter stops old emails from April/March flooding in.
+    // Category filter means $top=50 applies only to untagged emails, not total inbox.
+    // ConsistencyLevel: eventual required for advanced $filter on categories.
+    const weekStart = getWeekStartUTC();
+    console.log("Polling for unprocessed emails since (UTC):", weekStart);
     const result = await fetch(
       "https://graph.microsoft.com/v1.0/users/" + TRAINING_MAILBOX +
       "/mailFolders/inbox/messages" +
       "?$filter=not categories/any(c:c eq 'Jasmine Processed')" +
+      " and receivedDateTime ge " + weekStart +
       "&$orderby=receivedDateTime desc" +
       "&$top=50" +
       "&$count=true" +
