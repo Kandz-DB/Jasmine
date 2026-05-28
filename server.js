@@ -889,22 +889,30 @@ async function pollInbox() {
               console.log("Already processing this email ID in current poll cycle — skipping:", email.subject);
               continue;
             }
-            // Only block if there is a PENDING queue entry for this email.
-            // Dismissed, approved or superseded entries allow reprocessing.
+            // If there's a pending queue entry for this email but the user has removed
+            // the "Jasmine Processed" category, they're explicitly asking for a reprocess.
+            // Supersede the old entry and reprocess rather than silently skipping
+            // (which would loop forever without re-tagging the email).
             const pendingEntry = reviewQueue.find(
               e => e.email_id === email.id && e.status === "pending"
             );
             if (pendingEntry) {
-              console.log("Email already has a pending queue entry — skipping:", email.subject);
-              continue;
+              const categoryRemoved = !(email.categories || []).includes("Jasmine Processed");
+              if (categoryRemoved) {
+                // Deliberate reprocess — supersede old entry and proceed
+                pendingEntry.status = "superseded_reprocess";
+                pendingEntry.superseded_at = new Date().toISOString();
+                console.log("Pending entry superseded for deliberate reprocess:", email.subject);
+              } else {
+                // Category still present — normal dedup skip
+                console.log("Email already has a pending queue entry — skipping:", email.subject);
+                continue;
+              }
             }
             processingEmailIds.add(email.id);
             try {
               await processInboundEmail(email, clientName, token);
-            } finally {
-              // Keep in Set for the rest of this poll cycle; cleared on next server restart
-              // (Outlook category tag is the persistent guard across restarts)
-            }
+            } finally { }
         }
 
         // Tag as processed in Outlook — persistent guard across server restarts
