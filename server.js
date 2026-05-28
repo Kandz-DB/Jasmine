@@ -1865,27 +1865,66 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
     const zip = new PizZip(docxContent);
     let xmlStr = zip.file("word/document.xml").asText();
 
-    // Find the Request for Service table by its heading text
-    const tableStart = xmlStr.lastIndexOf("<w:tbl>", xmlStr.indexOf("Request for Service"));
-    const tableEnd = xmlStr.indexOf("</w:tbl>", tableStart) + 8;
-    let tableXml = xmlStr.slice(tableStart, tableEnd);
+    // ── ROBUST TABLE FINDER ───────────────────────────────────────────────────
+    // Word frequently splits text across multiple <w:r> runs, so a plain
+    // indexOf("Request for Service") on raw XML returns -1 → corrupt output.
+    // Instead we: (1) find every <w:tbl> block, (2) strip tags to get plain
+    // text, (3) identify the Section 5 / pricing table by expected cell keywords.
+    const allTableMatches = [...xmlStr.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)];
+    if (allTableMatches.length === 0) throw new Error("No tables found in document XML");
+
+    let targetMatch = null;
+    for (const m of allTableMatches) {
+      const plainText = m[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase();
+      if (/class cost|supplier confirms|facilitator name|course name|class times/.test(plainText)) {
+        targetMatch = m;
+        break;
+      }
+    }
+    // Fallback: use the last table (Section 5 is always at the bottom of DEECA forms)
+    if (!targetMatch) {
+      console.warn("Could not identify Section 5 table by keywords — using last table as fallback");
+      targetMatch = allTableMatches[allTableMatches.length - 1];
+    }
+
+    const tableStart = targetMatch.index;
+    const tableEnd   = targetMatch.index + targetMatch[0].length;
+    let tableXml = targetMatch[0];
 
     // Extract all rows from the table
     const rowMatches = [...tableXml.matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)];
+    console.log("Section 5 table found — rows:", rowMatches.length, "tableStart:", tableStart);
+    if (rowMatches.length === 0) throw new Error("Table found but contains no rows — possible XML split");
 
-    // Helper: set text in a specific cell of a row
+    // Helper: set text in a specific cell of a row.
+    // Produces well-formed OOXML even when tcPr / rPr are absent in the original.
     function setCellText(rowXml, cellIndex, newText) {
       const cells = [...rowXml.matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)];
       if (cellIndex >= cells.length) return rowXml;
       const cell = cells[cellIndex];
-      // Find the paragraph in this cell and replace all runs with a single new run
       const cellXml = cell[0];
-      // Preserve cell properties (shading, borders, width)
-      const tcPr = cellXml.match(/<w:tcPr>[\s\S]*?<\/w:tcPr>/) || [""];
-      const rPr = cellXml.match(/<w:rPr>[\s\S]*?<\/w:rPr>/) || [""];
-      const newCellXml = "<w:tc>" + tcPr[0] +
-        "<w:p><w:r>" + rPr[0] +
-        "<w:t xml:space=\"preserve\">" + newText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</w:t></w:r></w:p></w:tc>";
+
+      // Preserve cell properties (borders, width, shading) — empty string if absent
+      const tcPrMatch = cellXml.match(/<w:tcPr>[\s\S]*?<\/w:tcPr>/);
+      const tcPr = tcPrMatch ? tcPrMatch[0] : "";
+
+      // Preserve run character properties (bold, font size, etc.) — empty if absent.
+      // Prefer a <w:rPr> that lives INSIDE a <w:r> run rather than a paragraph-mark rPr.
+      const runRprMatch = cellXml.match(/<w:r>[\s\S]*?(<w:rPr>[\s\S]*?<\/w:rPr>)/);
+      const rPr = runRprMatch ? runRprMatch[1] : "";
+
+      // Build a minimal, valid OOXML cell:
+      //   <w:tc><w:tcPr/><w:p><w:r><w:rPr/><w:t>text</w:t></w:r></w:p></w:tc>
+      const escaped = String(newText)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+      const newCellXml = "<w:tc>" + tcPr +
+        "<w:p><w:r>" + rPr +
+        "<w:t xml:space=\"preserve\">" + escaped + "</w:t></w:r></w:p></w:tc>";
+
       return rowXml.slice(0, cell.index) + newCellXml + rowXml.slice(cell.index + cell[0].length);
     }
 
