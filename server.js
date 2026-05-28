@@ -236,10 +236,12 @@ async function checkCalendarSlot(startDT, endDT, token, trainerNames = []) {
       "&$select=subject,start,end,showAs&$top=20",
       null, t
     );
-    // Include "tentative" in time-slot conflicts — if Jasmine already holds a tentative
-    // slot for another booking on this date, a second processing run must not overwrite it.
+    // (a) Check the exact time slot for hard conflicts (busy/OOF only).
+    // Tentative events are NOT treated as hard blocks here — a tentative on another
+    // session/trainer must not prevent a new DEECA tentative from being created.
+    // Trainer-specific tentative conflicts are caught by the day-level check in (b).
     const timeConflicts = (slotResult && slotResult.value || []).filter(e =>
-      e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere" || e.showAs === "tentative"
+      e.showAs === "busy" || e.showAs === "oof" || e.showAs === "workingElsewhere"
     );
 
     // (b) If trainers provided, check the full calendar day for same-trainer clashes
@@ -518,10 +520,12 @@ EMAIL RULES:
 - For VA bookings, NEVER suggest alternative dates — always accommodate the original requested dates.
 
 DEECA EMAIL RULES:
-- DEECA bookings are ALWAYS tentative until a signed quote is returned — always say "tentatively booked", never "confirmed" or "proceeding as planned".
+- DEECA bookings are always tentative until a signed quote is returned — always say "tentatively booked", never "confirmed" or "proceeding as planned".
+- Never use ALL CAPS words in emails — write "tentative" not "TENTATIVE", "note" not "NOTE" etc.
 - When a date is unavailable: say "the [date] session is unavailable" — do NOT give the reason (e.g. do not mention trainer name or "prior commitment").
+- Do NOT mention alternative/alternate dates in the confirmation email — just confirm the single date that has been tentatively booked. Alternative dates are only mentioned when a requested date is unavailable.
 - Closing for DEECA emails: "Once you confirm your preferred date, we will tentatively book it in and send you a quote for review."
-- DEECA SINGLE-SESSION REQUEST (3 date options): The client wants ONE session. Check which dates Ross/trainer is available. Tentatively book the FIRST available date. In the client email, confirm that date as tentatively booked, apologise for any unavailable dates, list alternatives from calendar.
+- DEECA SINGLE-SESSION REQUEST (3 date options): The client wants ONE session. Check which dates Ross/trainer is available. Tentatively book the FIRST available date. In the client email, confirm only that date as tentatively booked.
 
 DEECA QUOTE ACCEPTANCE: If the client email is accepting/approving a quote previously sent, use action_type="deeca_quote_acceptance". Set diane_summary to flag that the client has accepted the quote and is ready to confirm. Do not create new calendar events — Diane will approve and trigger the calendar invite.
 
@@ -1865,27 +1869,21 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
     const zip = new PizZip(docxContent);
     let xmlStr = zip.file("word/document.xml").asText();
 
-    // ── ROBUST TABLE FINDER ───────────────────────────────────────────────────
-    // Word frequently splits text across multiple <w:r> runs, so a plain
-    // indexOf("Request for Service") on raw XML returns -1 → corrupt output.
-    // Instead we: (1) find every <w:tbl> block, (2) strip tags to get plain
-    // text, (3) identify the Section 5 / pricing table by expected cell keywords.
+    // ── TABLE FINDER — Request for Service is ALWAYS the last table ─────────
+    // The pricing section (Request for Service) is the final section of every
+    // DEECA form regardless of whether it's numbered Section 4, 5 or otherwise.
+    // Always taking the last table is simpler and more reliable than keyword
+    // scoring, which can match Section 2 on some form variants.
     const allTableMatches = [...xmlStr.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)];
     if (allTableMatches.length === 0) throw new Error("No tables found in document XML");
 
-    let targetMatch = null;
-    for (const m of allTableMatches) {
-      const plainText = m[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase();
-      if (/class cost|supplier confirms|facilitator name|course name|class times/.test(plainText)) {
-        targetMatch = m;
-        break;
-      }
-    }
-    // Fallback: use the last table (Section 5 is always at the bottom of DEECA forms)
-    if (!targetMatch) {
-      console.warn("Could not identify Section 5 table by keywords — using last table as fallback");
-      targetMatch = allTableMatches[allTableMatches.length - 1];
-    }
+    const targetMatch = allTableMatches[allTableMatches.length - 1];
+    console.log("Using last table as Request for Service section. Total tables in doc:", allTableMatches.length);
+
+    // Sanity log — verify it looks like the pricing table
+    const sanityText = targetMatch[0].replace(/<[^>]+>/g, " ").toLowerCase();
+    const looksRight = /supplier confirms|total cost|class cost|accommodation/.test(sanityText);
+    if (!looksRight) console.warn("Warning: last table may not be the pricing table — check DEECA form structure");
 
     const tableStart = targetMatch.index;
     const tableEnd   = targetMatch.index + targetMatch[0].length;
@@ -1893,8 +1891,8 @@ app.get("/api/generate-section5/:id", requireAuth, (req, res) => {
 
     // Extract all rows from the table
     const rowMatches = [...tableXml.matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)];
-    console.log("Section 5 table found — rows:", rowMatches.length, "tableStart:", tableStart);
-    if (rowMatches.length === 0) throw new Error("Table found but contains no rows — possible XML split");
+    console.log("Section 5 table rows found:", rowMatches.length, "| tableStart:", tableStart);
+    if (rowMatches.length === 0) throw new Error("Table found but contains no rows");
 
     // Helper: set text in a specific cell of a row.
     // Produces well-formed OOXML even when tcPr / rPr are absent in the original.
