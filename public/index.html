@@ -2324,7 +2324,7 @@ function renderQueue(items) {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
         <span style="background:${cc}22;color:${cc};font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;">${client}</span>
         ${item.booking_tag ? `<span style="background:${item.booking_tag.bg};color:${item.booking_tag.color};font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;border:1px solid ${item.booking_tag.color}33;">${item.booking_tag.label}</span>` : ""}
-        <span style="margin-left:auto;font-size:11px;color:#94a3b8;">${new Date(item.timestamp).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+        <span style="margin-left:auto;font-size:11px;color:#94a3b8;">${new Date(item.received_datetime||item.timestamp).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
       </div>
       <div style="font-size:13px;font-weight:600;color:#0f172a;margin-bottom:4px;">${esc(item.subject||"")}</div>
       <div style="font-size:12px;color:#64748b;margin-bottom:8px;">${esc(item.diane_summary||"").slice(0,120)}${(item.diane_summary||"").length>120?"…":""}</div>
@@ -2341,25 +2341,71 @@ function openQueueItem(id) {
   if (!item) return;
   const bks = item.bookings || [];
   const isDeeca = item.action_type === "deeca_quote";
+  const isConfirmCheck = item.action_type === "confirmation_check";
+
+  // ── Format received date/time nicely ──
+  const receivedRaw = item.received_datetime || item.timestamp;
+  let receivedStr = "";
+  try {
+    const d = new Date(receivedRaw);
+    receivedStr = d.toLocaleDateString("en-AU", { weekday:"long", day:"numeric", month:"long", year:"numeric" })
+      + ", " + d.toLocaleTimeString("en-AU", { hour:"2-digit", minute:"2-digit" });
+  } catch(e) { receivedStr = receivedRaw || ""; }
+
+  // ── Build green confirmed-facts bullets ──
+  function greenBullets(b) {
+    const lines = [];
+    if (b.session_type) lines.push("<li><strong>Session:</strong> " + esc(b.session_type) + (b.client ? " — " + esc(b.client) : "") + "</li>");
+    if (b.date && b.date.toLowerCase() !== "tbc") {
+      const timeStr = b.full_day ? "Full Day" : (b.session_start && b.session_end ? b.session_start + " – " + b.session_end : "");
+      lines.push("<li><strong>Date:</strong> " + esc(b.date) + (timeStr ? " &nbsp;" + esc(timeStr) : "") + "</li>");
+    }
+    if (b.trainers && b.trainers.length) lines.push("<li><strong>Trainer" + (b.trainers.length > 1 ? "s" : "") + ":</strong> " + esc(b.trainers.join(", ")) + "</li>");
+    if (b.venue) lines.push("<li><strong>Venue:</strong> " + esc(b.venue) + "</li>");
+    if (b.participants) lines.push("<li><strong>Participants:</strong> " + esc(String(b.participants)) + "</li>");
+    return lines.join("");
+  }
+
+  // ── Collect all flags into yellow bullets ──
+  const allFlags = [...(item.overall_flags || [])];
+  bks.forEach(function(b){ (b.flags || []).forEach(function(f){ if (!allFlags.includes(f)) allFlags.push(f); }); });
 
   document.getElementById("bk-detail-content").innerHTML = `
     <div class="bk-detail-title">${esc(item.subject||"")}</div>
-    <div class="bk-detail-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <span>From: ${esc(item.from_email||"")} · ${new Date(item.timestamp).toLocaleString("en-AU")}</span>
+    <div class="bk-detail-sub" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <span style="color:#64748b;">From: ${esc(item.from_email||"")}</span>
       ${item.booking_tag ? `<span style="background:${item.booking_tag.bg};color:${item.booking_tag.color};font-size:11px;font-weight:700;padding:2px 10px;border-radius:8px;border:1px solid ${item.booking_tag.color}33;">${item.booking_tag.label}</span>` : ""}
+      ${item.email_web_link ? `<a href="${item.email_web_link}" target="_blank" style="font-size:11px;font-weight:600;color:#1d4ed8;text-decoration:none;padding:2px 10px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;">📧 View Original Email</a>` : ""}
     </div>
-    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#14532d;line-height:1.7;">${esc(item.diane_summary||"")}</div>
-    ${item.overall_flags&&item.overall_flags.length?`<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#713f12;">⚠ ${item.overall_flags.join(" · ")}</div>`:""}
-    <div class="bk-detail-grid">
-      ${bks.map(function(b){ return `
-        <div class="bk-detail-field"><div class="bk-detail-lbl">SESSION</div><div class="bk-detail-val">${esc(b.session_type||"")}</div></div>
-        <div class="bk-detail-field"><div class="bk-detail-lbl">DATE</div><div class="bk-detail-val">${esc(b.date||"TBC")}</div></div>
-        <div class="bk-detail-field"><div class="bk-detail-lbl">START</div><div class="bk-detail-val">${esc(b.session_start||"")}</div></div>
-        <div class="bk-detail-field"><div class="bk-detail-lbl">STATE</div><div class="bk-detail-val">${esc(b.state||"")}</div></div>
-        <div class="bk-detail-field"><div class="bk-detail-lbl">TRAINERS</div><div class="bk-detail-val">${esc((b.trainers||[]).join(", "))}</div></div>
-        <div class="bk-detail-field"><div class="bk-detail-lbl">VENUE</div><div class="bk-detail-val">${esc(b.venue||"")}</div></div>
-      `;}).join("")}
+
+    <!-- GREEN: confirmed facts -->
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin-bottom:12px;">
+      <ul style="margin:0;padding-left:18px;font-size:13px;color:#14532d;line-height:2;">
+        <li><strong>Received:</strong> ${receivedStr}</li>
+        ${bks.map(function(b){ return greenBullets(b); }).join("")}
+        ${bks.length === 0 && item.diane_summary ? "<li>" + esc(item.diane_summary) + "</li>" : ""}
+      </ul>
     </div>
+
+    <!-- YELLOW: flags and actions -->
+    ${allFlags.length ? `
+    <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px 16px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:#713f12;letter-spacing:.05em;margin-bottom:6px;">⚠ FLAGS &amp; ACTIONS</div>
+      <ul style="margin:0;padding-left:18px;font-size:12px;color:#713f12;line-height:1.9;">
+        ${allFlags.map(function(f){ return "<li>" + esc(f) + "</li>"; }).join("")}
+      </ul>
+    </div>` : ""}
+
+    <!-- YELLOW: confirmation check note -->
+    ${isConfirmCheck ? `
+    <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px 16px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:#713f12;letter-spacing:.05em;margin-bottom:6px;">⚠ ACTION REQUIRED</div>
+      <ul style="margin:0;padding-left:18px;font-size:12px;color:#713f12;line-height:1.9;">
+        <li>Client is asking to confirm an existing booking — do not rebook</li>
+        <li>Reply to confirm the session is scheduled, or advise if not</li>
+      </ul>
+    </div>` : ""}
+
     ${item.client_email_body?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;letter-spacing:.05em;margin-bottom:6px;">DRAFT CLIENT EMAIL</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;font-size:12px;color:#374151;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.7;">${esc(item.client_email_body)}</div></div>`:""}
     ${isDeeca&&item.quote_section5?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:.05em;margin-bottom:6px;">REQUEST FOR SERVICE — COMPLETED QUOTE</div><div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 14px;font-size:12px;color:#14532d;white-space:pre-wrap;max-height:160px;overflow-y:auto;line-height:1.8;">${esc(item.quote_section5)}</div></div>`:""}
     ${item.drafts&&item.drafts.length?`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;">OUTLOOK DRAFTS READY</div>${item.drafts.map(function(d){return`<div style="font-size:12px;color:#15803d;padding:4px 0;">✓ ${esc(d.description||d.type)} → ${esc(d.to||"")}</div>`;}).join("")}</div>`:""}
@@ -2464,7 +2510,7 @@ async function reprocessAll() {
   const res = await apiCall("POST", "/api/reprocess-all");
   if (btn) { btn.disabled=false; btn.textContent="⚡ Force Reprocess"; }
   if (res && res.success) {
-    alert("Reprocessed " + res.processed + " email(s). Refreshing queue…");
+    alert("Reprocessed " + res.processed + " email(s)" + (res.skipped ? ", skipped " + res.skipped + " (already queued or not booking-related)" : "") + ". Refreshing queue…");
     await loadQueueFromServer();
   } else {
     alert("Error: " + (res && res.error ? res.error : "Unknown error"));
