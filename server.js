@@ -507,7 +507,7 @@ If DEECA form with multiple classes in section 2.2, list EACH class separately u
 
 Source material:
 ---
-${emailContent.slice(0, 10000)}`;
+${emailContent.slice(0, 6000)}`;
   }
 
   const step1Res = await client.messages.create({
@@ -734,7 +734,7 @@ async function processInboundEmail(email, clientName, token) {
     email.from.emailAddress.address.toLowerCase().includes("@risk2solution.com"))) &&
     /^(fw|fwd|re:\s*fw|re:\s*fwd):/i.test(email.subject || "");
 
-  if (!isInternalForward && !looksLikeBookingEmail(email.subject, email.bodyPreview || "")) {
+  if (!isInternalForward && !looksLikeBookingEmail(email.subject, bodyText)) {
     console.log("Pre-scan: no booking keywords found — skipping without API call: " + email.subject);
     emailLog.push({
       id: Date.now(),
@@ -842,8 +842,8 @@ async function processInboundEmail(email, clientName, token) {
     "Subject: " + (email.subject || ""),
     "Date received: " + (email.receivedDateTime || ""),
     "Client identified as: " + clientName,
-    "Body: " + bodyText.slice(0, 6000),
-    attachmentText.slice(0, 16000)
+    "Body: " + bodyText.slice(0, 3000),
+    attachmentText.slice(0, 8000)
   ].join("\n");
 
   let jasmineParsed, extractedFacts;
@@ -1397,7 +1397,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   try {
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",  // Haiku — chat is conversational Q&A, no need for Sonnet
-      max_tokens: 1500,
+      max_tokens: 800,
       system: [{ type: "text", text: JASMINE_CHAT_SYS, cache_control: { type: "ephemeral" } }],
       messages: messages.slice(-10)   // sliding window — last 10 messages only
     });
