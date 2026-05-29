@@ -34,21 +34,22 @@ console.log("Production mode — drafts go to real addresses. Diane sends manual
 // trainer_email_to values are overridden by this map at the code level.
 // Add/update addresses here as needed without touching the prompt.
 const TRAINER_EMAIL_MAP = {
-  "Ross Mackenzie":    "",   // TODO: add email
-  "Grant McDonald":   "",   // TODO: add email
-  "Dirk McLean":      "",   // TODO: add email
-  "Adam Stone":       "",   // TODO: add email
-  "Lawrence Phillips":"",   // TODO: add email
-  "Chris Walsh":      "",   // TODO: add email
-  "Paul Johnston":    "",   // TODO: add email
-  "Dan Du Plessis":   "",   // TODO: add email
-  "Mark Edmonds":     "",   // TODO: add email
-  "Mick Haran":       "",   // TODO: add email
-  "Marina Toailoa":   "",   // TODO: add email
-  "Shane Garrett":    "",   // TODO: add email
-  "Dave Cohen":       "",   // TODO: add email
-  "Andrew Chan":      "",   // TODO: add email
-  "Warren Kotkis":    "",   // TODO: add email
+  "Ross Mackenzie":    "ross.m@risk2solution.com",
+  "Grant McDonald":   "grant.m@risk2solution.com",
+  "Lawrence Phillips":"lawrence.p@risk2solution.com",
+  "Paul Johnston":    "paul.j@risk2solution.com",
+  "Adam Stone":       "adam.s@risk2solution.com",
+  "Mick Haran":       "michael.h@risk2solution.com",
+  "Dave Cohen":       "dave.c@risk2solution.com",
+  "Mark Edmonds":     "mark.e@risk2solution.com",
+  "Dirk McLean":      "dirk.m@risk2solution.com",
+  "Andrew Chan":      "andrew.c@risk2solution.com",
+  // Add remaining trainers when emails are available:
+  "Chris Walsh":      "chris.w@risk2solution.com",
+  "Dan Du Plessis":   "daniel.d@risk2solution.com",
+  "Marina Toailoa":   "marina.t@risk2solution.com",
+  "Shane Garrett":    "shane.g@risk2solution.com",
+  "Warren Kotkis":    "warren.k@risk2solution.com",
 };
 
 // Resolve a trainer name to their real email address.
