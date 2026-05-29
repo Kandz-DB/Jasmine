@@ -21,25 +21,49 @@ const KANDIA_EMAIL = process.env.KANDIA_EMAIL || "kandia@risk2solution.com";
 const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 // ── TEST MODE ─────────────────────────────────────────────────────────────────
-// When TEST_MODE=true, ALL outgoing emails (client + trainer) and calendar
-// attendees are redirected to TEST_EMAIL (defaults to the training mailbox).
-// No real trainer or client emails are ever touched during testing.
-// Set TEST_MODE=false (or remove it) once you are happy with the flow and
-// are ready to supply real trainer email addresses.
-const TEST_MODE  = (process.env.TEST_MODE || "true").toLowerCase() !== "false";
-const TEST_EMAIL = process.env.TEST_EMAIL || TRAINING_MAILBOX;
+// TEST_MODE removed — Jasmine now drafts to real addresses.
+// Emails are NEVER sent automatically. isDraft: true on every message means
+// only Diane can send from the Drafts folder. This is enforced in code and
+// cannot be bypassed — Jasmine has no send permission, only draft creation.
+function safeEmail(realAddress) { return realAddress; }
+console.log("Production mode — drafts go to real addresses. Diane sends manually from Drafts.");
 
-// Wrap every outgoing address through this function.
-// In TEST_MODE it returns the internal test mailbox; in production it returns
-// the real address as-is.
-function safeEmail(realAddress) {
-  if (TEST_MODE) return TEST_EMAIL;
-  return realAddress;
-}
+// ── TRAINER EMAIL MAP ─────────────────────────────────────────────────────────
+// Real email addresses for all trainers. Used when creating calendar invites
+// and trainer draft emails on Diane's approval. Jasmine's generated
+// trainer_email_to values are overridden by this map at the code level.
+// Add/update addresses here as needed without touching the prompt.
+const TRAINER_EMAIL_MAP = {
+  "Ross Mackenzie":    "",   // TODO: add email
+  "Grant McDonald":   "",   // TODO: add email
+  "Dirk McLean":      "",   // TODO: add email
+  "Adam Stone":       "",   // TODO: add email
+  "Lawrence Phillips":"",   // TODO: add email
+  "Chris Walsh":      "",   // TODO: add email
+  "Paul Johnston":    "",   // TODO: add email
+  "Dan Du Plessis":   "",   // TODO: add email
+  "Mark Edmonds":     "",   // TODO: add email
+  "Mick Haran":       "",   // TODO: add email
+  "Marina Toailoa":   "",   // TODO: add email
+  "Shane Garrett":    "",   // TODO: add email
+  "Dave Cohen":       "",   // TODO: add email
+  "Andrew Chan":      "",   // TODO: add email
+  "Warren Kotkis":    "",   // TODO: add email
+};
 
-if (TEST_MODE) {
-  console.log("⚠  TEST MODE ACTIVE — all emails/invites will be sent to: " + TEST_EMAIL);
-  console.log("   Set TEST_MODE=false in your environment to use real addresses.");
+// Resolve a trainer name to their real email address.
+// Falls back to whatever Jasmine generated if not in the map.
+function trainerEmail(nameOrAddr) {
+  if (!nameOrAddr) return "";
+  // If it looks like an email address already, try to match by name part
+  const byName = TRAINER_EMAIL_MAP[nameOrAddr];
+  if (byName) return byName;
+  // Try partial name match (e.g. "Ross" matches "Ross Mackenzie")
+  const lower = nameOrAddr.toLowerCase();
+  const match = Object.entries(TRAINER_EMAIL_MAP).find(([name]) =>
+    name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase().split(" ")[0])
+  );
+  return (match && match[1]) || nameOrAddr;
 }
 
 // ── DIANE'S EMAIL SIGNATURE ───────────────────────────────────────────────────
@@ -889,6 +913,15 @@ async function pollInbox() {
     for (const email of unprocessed) {
       try {
         const senderEmail = (email.from && email.from.emailAddress ? email.from.emailAddress.address : "").toLowerCase();
+
+        // Skip emails sent FROM the training mailbox itself — these are outgoing
+        // replies (e.g. Diane's sent confirmation) that loop back into the inbox
+        // because training@ was in the original email's To/CC field.
+        if (senderEmail === TRAINING_MAILBOX.toLowerCase()) {
+          console.log("Skipping email FROM training mailbox itself (sent reply loopback):", email.subject);
+          continue;
+        }
+
         let clientName = getClientFromEmail(senderEmail);
 
         // For internal senders (staff forwarding emails for testing/manual submission)
@@ -1495,7 +1528,7 @@ async function approveQueueEntry(entry) {
         const savedAddrs = bk.trainer_emails_for_invite || [];
         if (savedAddrs.length > 0) {
           savedAddrs.forEach(addr =>
-            inviteAttendees.push({ emailAddress: { address: safeEmail(addr) }, type: "required" }));
+            inviteAttendees.push({ emailAddress: { address: trainerEmail(addr) }, type: "required" }));
         } else {
           for (const te of (entry.trainer_emails || [])) {
             for (const addr of (te.trainer_email_to || [])) {
@@ -1526,7 +1559,7 @@ async function approveQueueEntry(entry) {
         results.calendar.push(bk.session_type + " confirmed — trainer invites sent");
         entry.calendar_event_id = bk.calendar_event_id;
         console.log("✓ Tentative → confirmed:", bk.session_type,
-          "| invites sent to:", inviteAttendees.map(a => a.emailAddress.address).join(", ") || "none (TEST_MODE or no trainers)");
+          "| invites sent to:", inviteAttendees.map(a => a.emailAddress.address).join(", ") || "none");
       } catch (err) {
         console.error("Calendar confirm/upgrade error:", err.message);
         results.errors.push("Calendar confirm error for " + bk.session_type + ": " + err.message);
@@ -1574,7 +1607,7 @@ async function approveQueueEntry(entry) {
     for (const te of (entry.trainer_emails || [])) {
       for (const addr of (te.trainer_email_to || [])) {
         if (addr && addr.includes("@")) {
-          trainerAttendees.push({ emailAddress: { address: safeEmail(addr) }, type: "required" });
+          trainerAttendees.push({ emailAddress: { address: trainerEmail(addr) }, type: "required" });
         }
       }
     }
@@ -1631,14 +1664,33 @@ async function approveQueueEntry(entry) {
     console.log("No drafts found — creating now on approve...");
     if (entry.client_email_body && entry.client_email_to) {
       try {
-        const clientDraft = await graphRequest("POST",
-          "/users/" + TRAINING_MAILBOX + "/messages",
-          {
-            subject: (TEST_MODE ? "[TEST] " : "") + (entry.client_email_subject || "Training Booking Confirmation"),
-            toRecipients: [{ emailAddress: { address: safeEmail(entry.client_email_to) } }],
-            body: { contentType: "HTML", content: (TEST_MODE ? "<div style=\"background:#fef9c3;border:1px solid #ca8a04;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;\"><strong>⚠ TEST MODE</strong> — Real recipient: <em>" + entry.client_email_to + "</em> · Redirected to " + TEST_EMAIL + "</div>" : "") + "<p>" + (entry.client_email_body||"").replace(/Kind Regards[\s\S]*$/i, "").split("\n").join("<br>") + "</p>" + DIANE_SIGNATURE_HTML },
-            isDraft: true
-          }, token);
+        const emailBodyHtml = "<p>" + (entry.client_email_body||"")
+          .replace(/Kind Regards[\s\S]*$/i, "").split("\n").join("<br>") + "</p>" + DIANE_SIGNATURE_HTML;
+
+        // Create the draft as a REPLY to the original email so the client's
+        // original booking request appears quoted below — no extra API cost.
+        // Falls back to a standalone draft if the original email ID is unavailable.
+        let clientDraft = null;
+        if (entry.email_id && !entry.email_id.startsWith("manual-")) {
+          clientDraft = await graphRequest("POST",
+            "/users/" + TRAINING_MAILBOX + "/messages/" + entry.email_id + "/createReply",
+            {
+              message: {
+                subject: entry.client_email_subject || "Training Booking Confirmation",
+                toRecipients: [{ emailAddress: { address: entry.client_email_to } }],
+                body: { contentType: "HTML", content: emailBodyHtml }
+              }
+            }, token);
+        } else {
+          clientDraft = await graphRequest("POST",
+            "/users/" + TRAINING_MAILBOX + "/messages",
+            {
+              subject: entry.client_email_subject || "Training Booking Confirmation",
+              toRecipients: [{ emailAddress: { address: entry.client_email_to } }],
+              body: { contentType: "HTML", content: emailBodyHtml },
+              isDraft: true
+            }, token);
+        }
         if (clientDraft && clientDraft.id) {
           console.log("✓ Client draft created on approve:", clientDraft.id);
           results.drafts.push("Client email to " + entry.client_email_to);
@@ -1660,9 +1712,9 @@ async function approveQueueEntry(entry) {
         const trDraft = await graphRequest("POST",
           "/users/" + TRAINING_MAILBOX + "/messages",
           {
-            subject: (TEST_MODE ? "[TEST] " : "") + (te.trainer_email_subject || "Session Booking"),
-            toRecipients: te.trainer_email_to.map(a => ({ emailAddress: { address: safeEmail(a) } })),
-            body: { contentType: "HTML", content: (TEST_MODE ? "<div style=\"background:#fef9c3;border:1px solid #ca8a04;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;\"><strong>⚠ TEST MODE</strong> — Real recipient(s): <em>" + te.trainer_email_to.join(", ") + "</em> · Redirected to " + TEST_EMAIL + "</div>" : "") + "<p>" + (te.trainer_email_body||"").split("\n").join("<br>") + "</p>" },
+            subject: te.trainer_email_subject || "Session Booking",
+            toRecipients: te.trainer_email_to.map(a => ({ emailAddress: { address: trainerEmail(a) } })),
+            body: { contentType: "HTML", content: "<p>" + (te.trainer_email_body||"").split("\n").join("<br>") + "</p>" },
             isDraft: true
           }, token);
         if (trDraft && trDraft.id) {
