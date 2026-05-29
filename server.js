@@ -1670,18 +1670,38 @@ async function approveQueueEntry(entry) {
 
         // Create the draft as a REPLY to the original email so the client's
         // original booking request appears quoted below — no extra API cost.
-        // Falls back to a standalone draft if the original email ID is unavailable.
+        // Two-step: (1) createReply to get threading + quoted original,
+        // (2) PATCH to prepend our content while keeping the quoted email intact.
+        // Falls back to a standalone draft for manual entries.
         let clientDraft = null;
         if (entry.email_id && !entry.email_id.startsWith("manual-")) {
-          clientDraft = await graphRequest("POST",
+          // Step 1: Create reply draft — sets In-Reply-To, References, conversationId
+          // and includes the quoted original email in the body automatically.
+          const replyShell = await graphRequest("POST",
             "/users/" + TRAINING_MAILBOX + "/messages/" + entry.email_id + "/createReply",
-            {
-              message: {
-                subject: entry.client_email_subject || "Training Booking Confirmation",
-                toRecipients: [{ emailAddress: { address: entry.client_email_to } }],
-                body: { contentType: "HTML", content: emailBodyHtml }
-              }
-            }, token);
+            { message: { toRecipients: [{ emailAddress: { address: entry.client_email_to } }] } },
+            token);
+
+          if (replyShell && replyShell.id) {
+            // Step 2: Fetch the auto-generated body (contains quoted original)
+            const draftDetail = await graphRequest("GET",
+              "/users/" + TRAINING_MAILBOX + "/messages/" + replyShell.id + "?$select=body",
+              null, token);
+            const quotedBody = (draftDetail && draftDetail.body && draftDetail.body.content) || "";
+
+            // Step 3: Prepend our reply content above the quoted original
+            const fullBody = emailBodyHtml + quotedBody;
+
+            // Step 4: PATCH the draft with combined content
+            await graphRequest("PATCH",
+              "/users/" + TRAINING_MAILBOX + "/messages/" + replyShell.id,
+              {
+                subject: entry.client_email_subject || ("Re: " + (entry.subject || "Training Booking")),
+                body: { contentType: "HTML", content: fullBody }
+              }, token);
+
+            clientDraft = replyShell;
+          }
         } else {
           clientDraft = await graphRequest("POST",
             "/users/" + TRAINING_MAILBOX + "/messages",
