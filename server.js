@@ -34,7 +34,7 @@ console.log("Production mode — drafts go to real addresses. Diane sends manual
 // trainer_email_to values are overridden by this map at the code level.
 // Add/update addresses here as needed without touching the prompt.
 const TRAINER_EMAIL_MAP = {
-  "Ross Mackenzie":    "ross.m@risk2solution.com",
+  "Ross Mackenzie":    "kandia@risk2solution.com",
   "Grant McDonald":   "grant.m@risk2solution.com",
   "Lawrence Phillips":"lawrence.p@risk2solution.com",
   "Paul Johnston":    "paul.j@risk2solution.com",
