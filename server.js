@@ -802,7 +802,10 @@ const EXCLUSION_KEYWORDS = [
   // IT / account issues
   "password", "log in", "login", "unable to complete", "unable to access",
   // General admin noise
-  "monthly reporting", "please send through", "still missing"
+  "monthly reporting", "please send through", "still missing",
+  // Microsoft Exchange automated notifications — never booking requests
+  "your meeting was forwarded", "has forwarded your meeting request",
+  "sent by microsoft exchange online", "meeting forward notification"
 ];
 
 function looksLikeBookingEmail(subject, bodyText) {
@@ -859,7 +862,7 @@ async function pollInbox() {
     if (!result || !result.value) { console.log("No unprocessed emails found."); return; }
     console.log("Unprocessed emails from Graph: " + result.value.length);
 
-    // shouldSkip: filter out calendar noise, auto-replies etc.
+    // shouldSkip: filter out calendar noise, auto-replies, Exchange notifications etc.
     const shouldSkip = (email) => {
       const subj = (email.subject || "").toLowerCase();
       const ct = (email.contentType || "").toLowerCase();
@@ -870,6 +873,11 @@ async function pollInbox() {
       if (subj.startsWith("cancelled:")) return false;
       if (subj.startsWith("automatic reply:")) return true;
       if (subj.startsWith("out of office:")) return true;
+      // Microsoft Exchange meeting notifications — not booking requests
+      if (subj.startsWith("meeting forward notification:")) return true;
+      if (subj.startsWith("meeting acceptance:")) return true;
+      if (subj.startsWith("meeting decline:")) return true;
+      if (subj.startsWith("meeting cancellation:")) return true;
       if (subj.includes("delivery failed")) return true;
       if (subj.includes("undeliverable")) return true;
       return false;
